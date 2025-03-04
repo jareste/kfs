@@ -757,25 +757,13 @@ void test_recursion(void)
 void task_read()
 {
     printf("Task 4 Started\n");
-    int i;
     int fd;
-    // i = _fork();
-    // printf("Forked: %d\n", i);
-    // if (i == 0)
-    // {
-    //     // printf("My parent is %d\n", current_task->parent->pid);
-    //     set_current_uid(1);
-    //     set_current_euid(1);
-    //     set_current_gid(1);
-    // }
-    // else
-    // {
-    //     // printf("My child is %d\n", current_task->children->task->pid);
-    // }
-    // printf("Task uid: %d, euid: %d. guid: %d\n", get_current_uid(), get_current_euid(), get_current_gid());
-    // signal(2, task_1_sighandler);
+    char buffer[11];
+    int return_value;
+    memcpy(buffer, "Task read\n", 10);
+    buffer[10] = '\0';
 
-    fd = open("/boot/task_read", O_WRONLY | O_CREAT | O_TRUNC);
+    fd = sys_open("/boot/task_read", O_WRONLY | O_CREAT | O_TRUNC);
     if (fd < 0)
     {
         puts_color("Failed to open /boot/task_read\n", RED);
@@ -783,23 +771,32 @@ void task_read()
     }
     printf("fd: %d\n", fd);
 
-    write(fd, "Task read\n", 10);
-    close(fd);
+    sys_write(fd, buffer, 10);
+    sys_close(fd);
 
     // while (1)
     // {
+        // fd = open("/boot/task_read", O_RDONLY);
+        // printf("fd------: %d\n", fd);
+        // if (fd < 0)
+        // {
+        //     puts_color("Failed to open /boot/task_read\n", RED);
+        //     return;
+        // }
+
+
+    while (1)
+    {
         fd = open("/boot/task_read", O_RDONLY);
-        printf("fd------: %d\n", fd);
         if (fd < 0)
         {
             puts_color("Failed to open /boot/task_read\n", RED);
             return;
         }
-
-        char buffer[11];
-        int return_value;
-        return_value = read(fd, buffer, sizeof(buffer));
-        if (return_value < 0)
+        return_value = sys_read(fd, buffer, sizeof(buffer));
+        // return_value = read(0, buffer, sizeof(buffer));
+        // return_value = write(3, buffer, return_value); // error writing to fd 3
+        if (return_value <= 0)
         {
             puts_color("Error reading\n", RED);
         }
@@ -810,16 +807,14 @@ void task_read()
             {
                 puts_color("Error reading\n", RED);
             }
-            putc('.');
-            // puts_color("Read: ", GREEN);
+            puts_color("Read: ", GREEN);
             puts_color(buffer, GREEN);
-            // puts_color("\n", GREEN);
+            puts_color("\n", GREEN);
         }
         close(fd);
         scheduler();
-    while (1)
-    {
     }
+
 }
 
 void task_wait()

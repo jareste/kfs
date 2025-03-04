@@ -59,23 +59,59 @@ int _sys_write(int fd, const char* buf, size_t count)
     return sys_write(fd, buf, count);
 }
 
+int sys_read2(int fd, char* buf, size_t count)
+{
+    if (!buf || count == 0)
+    {
+        printf("Read: Invalid buffer or count\n");
+        return -1;
+    }
+
+    const char* data = "123456789";
+    size_t data_len = strlen(data);
+
+    if (count > data_len)
+    {
+        count = data_len;
+    }
+
+    memcpy(buf, data, count);
+
+    // printf("Syscall: read(%d, %p, %d) - Filled buffer with: '", fd, buf, count);
+    // for (size_t i = 0; i < count; i++)
+    // {
+    //     putc(buf[i]);
+    // }
+    // puts("'\n");
+
+    return count;
+}
+
 int _sys_read(int fd, char* buf, size_t count)
 {
     if (!buf || count == 0)
         return -1;
 
+    // return sys_read2(fd, buf, count);
     if (fd == 0)
     {
-        clear_kb_buffer();
-        while (getc() != '\n') scheduler();
-        char* buffer = get_kb_buffer();
-        size_t len = strlen(buffer);
-        buffer[len - 1] = '\0'; /* remove '\n' */
-        strcpy(buf, buffer);
+        int len = count;
+        while (count > 0)
+        {
+            *buf = 'a';
+            buf++;
+            count--;
+        }
+        // clear_kb_buffer();
+        // while (getc() != '\n') scheduler();
+        // char* buffer = get_kb_buffer();
+        // size_t len = strlen(buffer);
+        // buffer[len - 1] = '\0'; /* remove '\n' */
+        // strcpy(buf, buffer);
         return len;
     }
 
-    return sys_read(fd, buf, count);
+    return sys_read2(fd, buf, count);
 }
 
 int _sys_open(const char* path, int flags)
