@@ -42,4 +42,10 @@ size_t ext2_fread(void *ptr, size_t size, size_t nmemb, ext2_FILE *stream);
 size_t ext2_fwrite(const void *ptr, size_t size, size_t nmemb, ext2_FILE *stream);
 int ext2_fclose(ext2_FILE *stream);
 
+int sys_open(const char *path, int flags);
+int sys_close(int fd);
+ssize_t sys_read(int fd, void *buf, size_t count);
+ssize_t sys_write(int fd, const void *buf, size_t count);
+
+
 #endif

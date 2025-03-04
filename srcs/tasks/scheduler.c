@@ -756,44 +756,69 @@ void test_recursion(void)
 
 void task_read()
 {
-    // printf("Task 4 Started\n");
+    printf("Task 4 Started\n");
     int i;
-    i = _fork();
+    int fd;
+    // i = _fork();
     // printf("Forked: %d\n", i);
-    if (i == 0)
-    {
-        // printf("My parent is %d\n", current_task->parent->pid);
-        set_current_uid(1);
-        set_current_euid(1);
-        set_current_gid(1);
-    }
-    else
-    {
-        // printf("My child is %d\n", current_task->children->task->pid);
-    }
+    // if (i == 0)
+    // {
+    //     // printf("My parent is %d\n", current_task->parent->pid);
+    //     set_current_uid(1);
+    //     set_current_euid(1);
+    //     set_current_gid(1);
+    // }
+    // else
+    // {
+    //     // printf("My child is %d\n", current_task->children->task->pid);
+    // }
     // printf("Task uid: %d, euid: %d. guid: %d\n", get_current_uid(), get_current_euid(), get_current_gid());
-    signal(2, task_1_sighandler);
+    // signal(2, task_1_sighandler);
+
+    fd = open("/boot/task_read", O_WRONLY | O_CREAT | O_TRUNC);
+    if (fd < 0)
+    {
+        puts_color("Failed to open /boot/task_read\n", RED);
+        return;
+    }
+    printf("fd: %d\n", fd);
+
+    write(fd, "Task read\n", 10);
+    close(fd);
+
+    // while (1)
+    // {
+        fd = open("/boot/task_read", O_RDONLY);
+        printf("fd------: %d\n", fd);
+        if (fd < 0)
+        {
+            puts_color("Failed to open /boot/task_read\n", RED);
+            return;
+        }
+
+        char buffer[11];
+        int return_value;
+        return_value = read(fd, buffer, sizeof(buffer));
+        if (return_value < 0)
+        {
+            puts_color("Error reading\n", RED);
+        }
+        else
+        {
+            buffer[return_value] = '\0';
+            if (strcmp(buffer, "Task read\n") != 0)
+            {
+                puts_color("Error reading\n", RED);
+            }
+            putc('.');
+            // puts_color("Read: ", GREEN);
+            puts_color(buffer, GREEN);
+            // puts_color("\n", GREEN);
+        }
+        close(fd);
+        scheduler();
     while (1)
     {
-        // char buffer[10];
-        // int return_value;
-        // return_value = read(0, buffer, sizeof(buffer));
-        // // return_value = write(3, buffer, return_value); // error writing to fd 3
-        // if (return_value <= 0)
-        // {
-        //     puts_color("Error reading\n", RED);
-        // }
-        // puts_color("Task 4\n", LIGHT_MAGENTA);
-        yeld();
-        // else
-        // {
-        //     buffer[return_value] = '\0';
-        //     puts_color("Read: ", GREEN);
-        //     puts_color(buffer, GREEN);
-        //     puts_color("\n", GREEN);
-        //     printf("Current task: %p\n", current_task);
-        // }
-        scheduler();
     }
 }
 

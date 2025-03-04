@@ -123,6 +123,41 @@ int sys_bind(int sockfd, const char *address)
     return 0;
 }
 
+ssize_t sys_recv(int fd, void *buf, size_t count)
+{
+    task_t *current;
+    file_t *file_obj;
+
+    current = get_current_task();
+    if (fd < 0 || fd >= MAX_FDS || current->fd_table[fd] == false)
+        return -1;
+
+     file_obj = &current->fd_pointers[fd];
+    if (file_obj->type != FD_SOCKET) {
+        printf("sys_recv: fd %d is not a socket\n", fd);
+        return -1;
+    }
+    return socket_recv(file_obj->socket, buf, count);
+}
+
+ssize_t sys_send(int fd, const void *buf, size_t count)
+{
+    task_t *current;
+    file_t *file_obj;
+
+    current = get_current_task();
+    if (fd < 0 || fd >= MAX_FDS || current->fd_table[fd] == false)
+        return -1;
+
+    file_obj = &current->fd_pointers[fd];
+    if (file_obj->type != FD_SOCKET) {
+        printf("sys_send: fd %d is not a socket\n", fd);
+        return -1;
+    }
+    return socket_send(file_obj->socket, buf, count);
+}
+
+
 int sys_connect(const char *address)
 {
     socket_t *peer = registry_lookup(address);

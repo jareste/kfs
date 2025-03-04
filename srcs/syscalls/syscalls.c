@@ -31,13 +31,6 @@ typedef union
 
 typedef union
 {
-    // syscall_handler_6_t handler_6;
-    // syscall_handler_5_t handler_5;
-    // syscall_handler_4_t handler_4;
-    // syscall_handler_3_t handler_3;
-    // syscall_handler_2_t handler_2;
-    // syscall_handler_1_t handler_1;
-    // syscall_handler_0_t handler_0;
     void* handler;
 } syscall_handler_t;
 
@@ -58,36 +51,18 @@ int sys_exit(int status)
 int _sys_write(int fd, const char* buf, size_t count)
 {
     if (!buf || count == 0)
-    {
-        printf("Write: Invalid buffer or count, %d\n", count);
         return -1;
-    }
-    if (fd < 0 || fd > 2)
-    {
-        // printf("Write: Invalid file descriptor\n");
+
+    if (fd < 0)
         return -1;
-    }
-    puts(buf);
-    return count;
+
+    return sys_write(fd, buf, count);
 }
 
 int _sys_read(int fd, char* buf, size_t count)
 {
     if (!buf || count == 0)
-    {
-        printf("Read: Invalid buffer or count\n");
         return -1;
-    }
-
-// char* get_line()
-// {
-//     clear_kb_buffer();
-//     while (getc() != '\n') scheduler();
-//     char* buffer = get_kb_buffer();
-//     buffer[strlen(buffer) - 1] = '\0'; /* remove '\n' */
-//     return buffer;
-// }
-
 
     if (fd == 0)
     {
@@ -100,26 +75,19 @@ int _sys_read(int fd, char* buf, size_t count)
         return len;
     }
 
-    // printf("Syscall: read(%d, %p, %d) - Filled buffer with: '", fd, buf, count);
-    // for (size_t i = 0; i < count; i++)
-    // {
-    //     putc(buf[i]);
-    // }
-    // puts("'\n");
-
-    return count;
+    return sys_read(fd, buf, count);
 }
 
 int _sys_open(const char* path, int flags)
 {
     printf("Syscall: open(%s, %d)\n", path, flags);
-    return 1;
+    return sys_open(path, flags);
 }
 
 int _sys_close(int fd)
 {
     printf("Syscall: close(%d)\n", fd);
-    return 1;
+    return sys_close(fd);
 }
 
 int sys_get_pid()
@@ -164,16 +132,14 @@ int syscall_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_st
     uint32_t arg5 = reg.edi;
     uint32_t arg6 = reg.ebp;
 
-    // printf("Syscall: %d\n", syscall_number);
     if (syscall_number >= SYS_MAX_SYSCALL || syscall_table[syscall_number].handler.handler == NULL)
     {
         printf("Unknown syscall: %d\n", syscall_number);
         return -1;
     }
-    // printf("syscall happening: %d\n", syscall_happening);
+    
     while (syscall_happening)
     {
-        // puts("Syscall happening\n");
         scheduler();
     }
     syscall_happening = true;

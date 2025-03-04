@@ -614,25 +614,30 @@ int sys_open(const char *path, int flags)
     ext2_FILE *fp;
 
     /* Find a free file descriptor slot */
-    for (fd = 0; fd < MAX_FDS; fd++) {
+    for (fd = 3; fd < MAX_FDS; fd++)
+    {
         if (current->fd_table[fd] == false)
             break;
     }
-    if (fd == MAX_FDS) {
+    if (fd == MAX_FDS)
+    {
         printf("sys_open: too many open files\n");
         return -1;
     }
 
     /* For simplicity, if O_WRONLY or O_RDWR with O_CREAT is specified,
        choose an appropriate mode string */
-    if (flags & O_CREAT) {
+    if (flags & O_CREAT)
+    {
         if (flags & O_TRUNC)
             strcpy(mode_str, "w");
         else if (flags & O_APPEND)
             strcpy(mode_str, "a");
         else
             strcpy(mode_str, "r+");
-    } else {
+    }
+    else
+    {
         strcpy(mode_str, "r");
     }
 
