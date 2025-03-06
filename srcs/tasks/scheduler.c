@@ -445,7 +445,7 @@ void create_user_task(void (*entry)(char**), char* name, void (*on_exit)(void))
     memcpy(task->name, name, strlen(name) > 15 ? 15 : strlen(name));
     task->name[strlen(name) > 15 ? 15 : strlen(name)] = '\0';
     task->on_exit = on_exit;
-    task->entry = entry;
+    task->entry_env = entry;
     task->uid = 1000;
     task->euid = 1000;
     task->gid = 1000;
@@ -690,6 +690,7 @@ void socket_1()
 {
 
     int sock;
+    char* buffer = "Socket 1\n";
 
     sock = sys_socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0)
@@ -701,7 +702,7 @@ void socket_1()
 
     while(1)
     {
-        sys_write(sock, "Socket 1\n", 9);
+        write(sock, buffer, strlen(buffer));
         scheduler();
     }
 
@@ -712,6 +713,8 @@ void socket_2()
     int sock;
     char buffer[10];
     int return_value;
+    char* err_str = "Error reading\n";
+    char* read_str = "Read: ";
 
     sock = sys_connect("/foo/bar");
     if (sock < 0)
@@ -722,19 +725,18 @@ void socket_2()
 
     while(1)
     {
-        return_value = sys_read(sock, buffer, sizeof(buffer));
+        return_value = read(sock, buffer, sizeof(buffer));
         if (return_value < 0)
         {
             // enable_print();
-            puts_color("Error reading\n", RED);
+            puts_color(err_str, RED);
         }
-        // else
-        // {
-        //     buffer[return_value] = '\0';
-        //     puts_color("Read: ", GREEN);
-        //     puts_color(buffer, GREEN);
-        //     puts_color("\n", GREEN);
-        // }
+        else if (return_value > 0)
+        {
+            buffer[return_value] = '\0';
+            puts_color(read_str, GREEN);
+            puts_color(buffer, GREEN);
+        }
         scheduler();
     }
 
@@ -760,20 +762,31 @@ void task_read()
     int fd;
     char buffer[11];
     int return_value;
-    memcpy(buffer, "Task read\n", 10);
+    char* buffer_filler = "Task read\n";
+    memcpy(buffer, buffer_filler, 10);
     buffer[10] = '\0';
+    char* read_str = "Read :";
+    char* err_str = "Error reading\n";
+    char* cmp_buff = "Task read\n";
+    char* filename = "/boot/task_read";
+    char* pointer = "%p '%s'\n";
+    char* fd_str = "fd: %d\n";
 
-    fd = sys_open("/boot/task_read", O_WRONLY | O_CREAT | O_TRUNC);
+    // while (1) scheduler();
+
+    fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC);
     if (fd < 0)
     {
         puts_color("Failed to open /boot/task_read\n", RED);
         return;
     }
-    printf("fd: %d\n", fd);
 
-    sys_write(fd, buffer, 10);
-    sys_close(fd);
+    printf(fd_str, fd);
 
+    write(fd, buffer, 10);
+    close(fd);
+
+    memset(buffer, 0, sizeof(buffer));
     // while (1)
     // {
         // fd = open("/boot/task_read", O_RDONLY);
@@ -787,13 +800,13 @@ void task_read()
 
     while (1)
     {
-        fd = open("/boot/task_read", O_RDONLY);
+        fd = open(filename, O_RDONLY);
         if (fd < 0)
         {
             puts_color("Failed to open /boot/task_read\n", RED);
             return;
         }
-        return_value = sys_read(fd, buffer, sizeof(buffer));
+        return_value = read(fd, buffer, sizeof(buffer));
         // return_value = read(0, buffer, sizeof(buffer));
         // return_value = write(3, buffer, return_value); // error writing to fd 3
         if (return_value <= 0)
@@ -802,14 +815,13 @@ void task_read()
         }
         else
         {
-            buffer[return_value] = '\0';
-            if (strcmp(buffer, "Task read\n") != 0)
+            // buffer[return_value] = '\0';
+            if (strcmp(buffer, buffer_filler) != 0)
             {
-                puts_color("Error reading\n", RED);
+                puts_color(err_str, RED);
             }
-            puts_color("Read: ", GREEN);
+            puts_color(read_str, GREEN);
             puts_color(buffer, GREEN);
-            puts_color("\n", GREEN);
         }
         close(fd);
         scheduler();
@@ -867,7 +879,7 @@ void start_foo_tasks(void)
 {
     create_task(kshell, "kshell", NULL);
     create_task(task_wait, "task_wait", NULL);
-    create_task(task_1, "task_1", task_1_exit);
+    // create_task(task_1, "task_1", task_1_exit);
     create_task(task_read, "task_read", NULL);
     create_task(task_2, "task_2", task_2_exit);
     create_task(socket_1, "socket_1", NULL);

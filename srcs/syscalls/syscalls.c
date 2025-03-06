@@ -111,7 +111,7 @@ int _sys_read(int fd, char* buf, size_t count)
         return len;
     }
 
-    return sys_read2(fd, buf, count);
+    return sys_read(fd, buf, count);
 }
 
 int _sys_open(const char* path, int flags)
@@ -158,7 +158,7 @@ void force_no_syscall()
     syscall_happening = false;
 }
 
-int syscall_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_state stack)
+int syscall_handler(registers reg)
 {
     uint32_t syscall_number = reg.eax;
     uint32_t arg1 = reg.ebx;
@@ -174,11 +174,11 @@ int syscall_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_st
         return -1;
     }
     
-    while (syscall_happening)
-    {
-        scheduler();
-    }
-    syscall_happening = true;
+    // while (syscall_happening)
+    // {
+    //     scheduler();
+    // }
+    // syscall_happening = true;
 
     syscall_entry_t entry = syscall_table[syscall_number];
 
@@ -193,7 +193,7 @@ int syscall_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_st
             ret_value.int_value = ((syscall_handler_1_t)entry.handler.handler)(arg1);
             break;
         case 2:
-            ret_value.int_value = ((syscall_handler_2_t)entry.handler.handler)(reg.ebx, reg.ecx);
+            ret_value.int_value = ((syscall_handler_2_t)entry.handler.handler)(arg1, arg2);
             break;
         case 3:
             ret_value.int_value = ((syscall_handler_3_t)entry.handler.handler)(arg1, arg2, arg3);
@@ -215,7 +215,7 @@ int syscall_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_st
 
     // scheduler();
 
-    syscall_happening = false;
+    // syscall_happening = false;
     return ret_value.int_value;
 }
 

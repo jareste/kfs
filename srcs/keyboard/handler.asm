@@ -32,6 +32,7 @@
 ; handles isrs (software interrupts)
 common_isr_handler:
 	; save registers
+	cli
 	pusha
 
 	; call c function
@@ -44,28 +45,21 @@ common_isr_handler:
 	add	esp, 8
 
 	; iret call
+	sti
 	iret
 
 global syscall_handler_asm
 syscall_handler_asm:
-; when calling here i must build a trampoline, so then i'll not care about the stack corruption
-	push 0
-	push 0x30
-    pusha
-    call syscall_handler
-    mov [esp + 28], eax ; save the return value
-    popa
-	add esp, 8
-	; this shouldnt be here
-	; mov eax, 0x20
-	; out 0x20, al
-    ; .kkkk:
-	; jmp .kkkk
+	pusha
+	call syscall_handler
+	mov [esp + 28], eax   ; This writes to the saved EAX (pusha order: EDI, ESI, EBP, original ESP, EBX, EDX, ECX, EAX)
+	popa
 	iret
 
 ; handles irqs (hardware interrupts)
 common_irq_handler:
 	; save registers
+	cli
 	pusha
 
 	; call c function
@@ -78,6 +72,7 @@ common_irq_handler:
 	add	esp, 8
 
 	; iret call
+	sti
 	iret
 
 no_error_code_isr_handler 0

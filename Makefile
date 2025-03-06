@@ -6,7 +6,8 @@ BIN_PATH = ./iso/boot/kernel.bin
 
 CC = gcc
 AS = nasm
-CFLAGS = -m32 -ffreestanding -nostdlib -nodefaultlibs -fno-builtin -fno-exceptions -fno-stack-protector -O3
+# CFLAGS = -m32 -ffreestanding -nostdlib -nodefaultlibs -fno-builtin -fno-exceptions -fno-stack-protector -O3
+CFLAGS = -m32 -ffreestanding -nostdlib -nodefaultlibs -fno-builtin -fno-exceptions -fno-stack-protector -g
 ASFLAGS = -f elf
 LDFLAGS = -m elf_i386
 
@@ -89,6 +90,9 @@ run:
 	qemu-system-i386 -kernel kernel.bin -drive file=disk.img,if=ide,index=0,media=disk,format=raw
 
 	# qemu-system-i386 -kernel $(BIN_NAME) #-m 4096
+
+debug_qemu:
+	qemu-system-i386 -kernel $(BIN_NAME) -s -S -drive file=disk.img,if=ide,index=0,media=disk,format=raw
 
 run_debug:
 	qemu-system-i386 -kernel $(BIN_NAME) -d int,cpu_reset #-m 4096
