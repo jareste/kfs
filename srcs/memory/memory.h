@@ -41,6 +41,7 @@ void* mmap(void* addr, size_t length, int prot, int flags, int fd, off_t offset)
 int munmap(void* addr, size_t length);
 
 void* vstrdup(const char *s);
+void* kstrdup(const char *s);
 
 void make_page_user(uintptr_t addr);
 

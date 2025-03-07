@@ -11,5 +11,7 @@ size_t read(int fd, char* buf, size_t count);
 int get_pid();
 void yeld();
 void exit(int status);
+int open(const char* path, int flags);
+int close(int fd);
 
 #endif

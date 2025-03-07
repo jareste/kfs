@@ -6,6 +6,7 @@
 #include "../kshell/kshell.h"
 #include "../keyboard/keyboard.h"
 #include "../display/display.h"
+#include "../tasks/task.h"
 #include "ext2_fileio.h"
 
 extern int ide_read_sectors(uint32_t lba, uint8_t count, void *buffer);
@@ -604,6 +605,122 @@ size_t ext2_fwrite(const void *ptr, size_t size, size_t nmemb, ext2_FILE *stream
     return total / size; /* number of "elements" written */
 }
 
+/* --- Fileio fds Implementations --- */
+int sys_open(const char *path, int flags)
+{
+    task_t *current = get_current_task();
+    int fd;
+    char mode_str[4];
+    ext2_FILE *fp;
+
+    /* Find a free file descriptor slot */
+    for (fd = 3; fd < MAX_FDS; fd++)
+    {
+        if (current->fd_table[fd] == false)
+            break;
+    }
+    if (fd == MAX_FDS)
+    {
+        printf("sys_open: too many open files\n");
+        return -1;
+    }
+
+    /* For simplicity, if O_WRONLY or O_RDWR with O_CREAT is specified,
+       choose an appropriate mode string */
+    if (flags & O_CREAT)
+    {
+        if (flags & O_TRUNC)
+            strcpy(mode_str, "w");
+        else if (flags & O_APPEND)
+            strcpy(mode_str, "a");
+        else
+            strcpy(mode_str, "r+");
+    }
+    else
+    {
+        strcpy(mode_str, "r");
+    }
+
+    fp = ext2_fopen(path, mode_str);
+    if (!fp)
+        return -1;
+
+    /* Fill the file_t structure in the task's fd_pointers array */
+    current->fd_pointers[fd].flags = flags;
+    current->fd_pointers[fd].file = fp;
+    current->fd_pointers[fd].offset = fp->pos;
+    current->fd_pointers[fd].ref_count = 1;
+    current->fd_table[fd] = true;
+
+    return fd;
+}
+
+int sys_close(int fd)
+{
+    task_t* current;
+    file_t* file_obj;
+    
+    current = get_current_task();
+    if (fd < 0 || fd >= MAX_FDS || current->fd_table[fd] == false)
+        return -1;
+
+    /* Get pointer to the file object in the array */
+    file_obj = &current->fd_pointers[fd];
+    if (file_obj->type == FD_SOCKET)
+    {
+        socket_close(file_obj->socket);
+    }
+    else
+        ext2_fclose(file_obj->file);
+    
+    /* Mark slot as free and zero out the structure */
+    current->fd_table[fd] = false;
+    memset(&current->fd_pointers[fd], 0, sizeof(file_t));
+    return 0;
+}
+
+ssize_t sys_read(int fd, void *buf, size_t count)
+{
+    task_t *current;
+    file_t *file_obj;
+    size_t n;
+
+    current = get_current_task();
+    if (fd < 0 || fd >= MAX_FDS || current->fd_table[fd] == false)
+        return -1;
+
+    file_obj = &current->fd_pointers[fd];
+    if (file_obj->type == FD_SOCKET)
+    {
+        return socket_recv(file_obj->socket, buf, count);
+    }
+
+    n = ext2_fread(buf, 1, count, file_obj->file);
+    file_obj->offset = file_obj->file->pos;
+    return n;
+}
+
+ssize_t sys_write(int fd, const void *buf, size_t count)
+{
+    task_t *current;
+    file_t *file_obj;
+    size_t n;
+
+    current = get_current_task();
+    if (fd < 0 || fd >= MAX_FDS || current->fd_table[fd] == false)
+        return -1;
+
+    file_obj = &current->fd_pointers[fd];
+    if (file_obj->type == FD_SOCKET)
+    {
+        return socket_send(file_obj->socket, buf, count);
+    }
+
+    n = ext2_fwrite(buf, 1, count, file_obj->file);
+    file_obj->offset = file_obj->file->pos;
+    return n;
+}
+
 /* --- Command Implementations --- */
 void ext2_cmd_ls(const char *path)
 {
@@ -1029,6 +1146,8 @@ static void cmd_cd();
 static void cmd_cp();
 static void cmd_mv();
 static void cmd_pwd(void);
+static void cmd_tfds(void);
+static void cmd_tfdopen();
 
 command_t ext2_commands[] = {
     {"ls", "List directory contents", cmd_ls},
@@ -1041,6 +1160,12 @@ command_t ext2_commands[] = {
     {"cp", "Copy a file", cmd_cp},
     {"mv", "Move or rename a file", cmd_mv},
     {"pwd", "Print working directory", cmd_pwd},
+    {NULL, NULL, NULL}
+};
+
+command_t ext2_commands_debug[] = {
+    {"tfds", "Test fds implementation", cmd_tfds},
+    {"tfdopen", "Test fopen implementation", cmd_tfdopen},
     {NULL, NULL, NULL}
 };
 
@@ -1116,6 +1241,72 @@ static void cmd_pwd(void)
     }
 }
 
+static void cmd_tfds(void)
+{
+    int fd;
+
+    fd = sys_open("/etc/users.config", O_RDONLY);
+    if (fd < 0)
+    {
+        printf("Failed to open /etc/users.config\n");
+        return;
+    }
+
+    char buf[256];
+    ssize_t n = sys_read(fd, buf, sizeof(buf));
+    if (n < 0)
+    {
+        printf("Failed to read /etc/users.config\n");
+        sys_close(fd);
+        return;
+    }
+
+    printf("Read %d bytes from /etc/users.config:\n", n);
+    for (int i = 0; i < n; i++)
+        putc(buf[i]);
+    sys_close(fd);
+}
+
+static void cmd_tfdopen()
+{
+    int fd;
+    ssize_t n;
+    const char *msg = "Hello from ext12_fwrite!\n";
+    char buf[128];
+
+    fd = sys_open("helloTFD.txt", O_WRONLY | O_CREAT | O_TRUNC);
+    if (fd < 0)
+    {
+        printf("Failed to open hello.txt for writing\n");
+        return;
+    }
+
+    sys_write(fd, msg, strlen(msg));
+    sys_close(fd);
+
+    printf("Wrote to hello.txt, fd %d\n", fd);
+
+    fd = sys_open("helloTFD.txt", O_RDONLY);
+    if (fd < 0)
+    {
+        printf("Failed to open hello.txt for reading\n");
+        return;
+    }
+    memset(buf, 0, sizeof(buf));
+    n = sys_read(fd, buf, sizeof(buf) - 1);
+
+    printf("Read from fd(%d) '%d' bytes: %s", fd, n, buf);
+    
+    if (strcmp(buf, msg) != 0)
+    {
+        printf("Failed to read back what was written\n");
+        sys_close(fd);
+        return;
+    }
+    printf("Read %u bytes: %s\n", (unsigned)n, buf);
+    sys_close(fd);
+}
+
 void create_unix_dirs()
 {
     ext2_cmd_mkdir("bin");
@@ -1176,6 +1367,7 @@ void ext2_mount(void)
     ext2_read_block(ext2.gd.bg_block_bitmap, ext2.block_bitmap);
     kfree(buf);
     install_all_cmds(ext2_commands, GLOBAL);
+    install_all_cmds(ext2_commands_debug, DEBUG);
     create_unix_dirs();
     test_fileio();
 }

@@ -6,6 +6,7 @@
 #include "../utils/utils.h"
 #include "cpu_state.h"
 #include "env.h"
+#include "../ide/ext2_fileio.h"
 
 typedef enum
 {
@@ -35,7 +36,11 @@ typedef struct task_struct
     task_state_t state;
     char name[16];
     void (*on_exit)(void);
-    void (*entry)(void);
+    union
+    {
+        void (*entry)(void);
+        void (*entry_env)(char**);
+    };
     signal_context_t signals;
     size_t owner;
     void *mem_block;      // pointer to the big allocation
@@ -46,7 +51,10 @@ typedef struct task_struct
     gid_t gid;
     bool is_user;
 
-    env_hashtable_t *env;
+    file_t fd_pointers[MAX_FDS];
+    bool fd_table[MAX_FDS];
+
+    env_hashtable_t *env; /* should not be used from the kernel itself (? */
     /* missing fields but untill it'll not work makes no sense to add them */    
 } task_t;
 

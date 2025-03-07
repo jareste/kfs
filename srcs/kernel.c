@@ -39,12 +39,12 @@ void kernel_main()
 
     init_syscalls();
 
+    tty_init();
     // kshell(); /* Uncomment this line to not run the scheduler */
     scheduler_init();
     start_foo_tasks();
 
     enable_print();
-    
     scheduler();
 
     /* Keep CPU busy */

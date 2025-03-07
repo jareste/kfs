@@ -31,13 +31,6 @@ typedef union
 
 typedef union
 {
-    // syscall_handler_6_t handler_6;
-    // syscall_handler_5_t handler_5;
-    // syscall_handler_4_t handler_4;
-    // syscall_handler_3_t handler_3;
-    // syscall_handler_2_t handler_2;
-    // syscall_handler_1_t handler_1;
-    // syscall_handler_0_t handler_0;
     void* handler;
 } syscall_handler_t;
 
@@ -55,23 +48,18 @@ int sys_exit(int status)
     return status;
 }
 
-int sys_write(int fd, const char* buf, size_t count)
+int _sys_write(int fd, const char* buf, size_t count)
 {
     if (!buf || count == 0)
-    {
-        printf("Write: Invalid buffer or count, %d\n", count);
         return -1;
-    }
-    if (fd < 0 || fd > 2)
-    {
-        // printf("Write: Invalid file descriptor\n");
+
+    if (fd < 0)
         return -1;
-    }
-    puts(buf);
-    return count;
+
+    return sys_write(fd, buf, count);
 }
 
-int sys_read(int fd, char* buf, size_t count)
+int sys_read2(int fd, char* buf, size_t count)
 {
     if (!buf || count == 0)
     {
@@ -79,26 +67,15 @@ int sys_read(int fd, char* buf, size_t count)
         return -1;
     }
 
-// char* get_line()
-// {
-//     clear_kb_buffer();
-//     while (getc() != '\n') scheduler();
-//     char* buffer = get_kb_buffer();
-//     buffer[strlen(buffer) - 1] = '\0'; /* remove '\n' */
-//     return buffer;
-// }
+    const char* data = "123456789";
+    size_t data_len = strlen(data);
 
-
-    if (fd == 0)
+    if (count > data_len)
     {
-        clear_kb_buffer();
-        while (getc() != '\n') scheduler();
-        char* buffer = get_kb_buffer();
-        size_t len = strlen(buffer);
-        buffer[len - 1] = '\0'; /* remove '\n' */
-        strcpy(buf, buffer);
-        return len;
+        count = data_len;
     }
+
+    memcpy(buf, data, count);
 
     // printf("Syscall: read(%d, %p, %d) - Filled buffer with: '", fd, buf, count);
     // for (size_t i = 0; i < count; i++)
@@ -110,16 +87,43 @@ int sys_read(int fd, char* buf, size_t count)
     return count;
 }
 
-int sys_open(const char* path, int flags)
+int _sys_read(int fd, char* buf, size_t count)
 {
-    printf("Syscall: open(%s, %d)\n", path, flags);
-    return 1;
+    if (!buf || count == 0)
+        return -1;
+
+    // return sys_read2(fd, buf, count);
+    if (fd == 0)
+    {
+        int len = count;
+        while (count > 0)
+        {
+            *buf = 'a';
+            buf++;
+            count--;
+        }
+        // clear_kb_buffer();
+        // while (getc() != '\n') scheduler();
+        // char* buffer = get_kb_buffer();
+        // size_t len = strlen(buffer);
+        // buffer[len - 1] = '\0'; /* remove '\n' */
+        // strcpy(buf, buffer);
+        return len;
+    }
+
+    return sys_read(fd, buf, count);
 }
 
-int sys_close(int fd)
+int _sys_open(const char* path, int flags)
 {
-    printf("Syscall: close(%d)\n", fd);
-    return 1;
+    // printf("Syscall: open(%s, %d)\n", path, flags);
+    return sys_open(path, flags);
+}
+
+int _sys_close(int fd)
+{
+    // printf("Syscall: close(%d)\n", fd);
+    return sys_close(fd);
 }
 
 int sys_get_pid()
@@ -149,12 +153,7 @@ pid_t fork()
 
 syscall_entry_t syscall_table[SYS_MAX_SYSCALL];
 
-void force_no_syscall()
-{
-    syscall_happening = false;
-}
-
-int syscall_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_state stack)
+int syscall_handler(registers reg)
 {
     uint32_t syscall_number = reg.eax;
     uint32_t arg1 = reg.ebx;
@@ -164,19 +163,17 @@ int syscall_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_st
     uint32_t arg5 = reg.edi;
     uint32_t arg6 = reg.ebp;
 
-    // printf("Syscall: %d\n", syscall_number);
     if (syscall_number >= SYS_MAX_SYSCALL || syscall_table[syscall_number].handler.handler == NULL)
     {
         printf("Unknown syscall: %d\n", syscall_number);
         return -1;
     }
-    // printf("syscall happening: %d\n", syscall_happening);
-    while (syscall_happening)
-    {
-        // puts("Syscall happening\n");
-        scheduler();
-    }
-    syscall_happening = true;
+    
+    // while (syscall_happening)
+    // {
+    //     scheduler();
+    // }
+    // syscall_happening = true;
 
     syscall_entry_t entry = syscall_table[syscall_number];
 
@@ -191,7 +188,7 @@ int syscall_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_st
             ret_value.int_value = ((syscall_handler_1_t)entry.handler.handler)(arg1);
             break;
         case 2:
-            ret_value.int_value = ((syscall_handler_2_t)entry.handler.handler)(reg.ebx, reg.ecx);
+            ret_value.int_value = ((syscall_handler_2_t)entry.handler.handler)(arg1, arg2);
             break;
         case 3:
             ret_value.int_value = ((syscall_handler_3_t)entry.handler.handler)(arg1, arg2, arg3);
@@ -211,9 +208,9 @@ int syscall_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_st
             break;
     }
 
-    // scheduler();
+    scheduler();
 
-    syscall_happening = false;
+    // syscall_happening = false;
     return ret_value.int_value;
 }
 
@@ -230,25 +227,25 @@ void init_syscalls()
     syscall_table[SYS_WRITE] = (syscall_entry_t){
         .ret_value_entry = RET_SIZE,
         .num_args = 3,
-        .handler.handler = (void*)sys_write,
+        .handler.handler = (void*)_sys_write,
     };
 
     syscall_table[SYS_READ] = (syscall_entry_t){
         .ret_value_entry = RET_SIZE,
         .num_args = 3,
-        .handler.handler = (void*)sys_read,
+        .handler.handler = (void*)_sys_read,
     };
 
     syscall_table[SYS_OPEN] = (syscall_entry_t){
         .ret_value_entry = RET_INT,
         .num_args = 2,
-        .handler.handler = (void*)sys_open,
+        .handler.handler = (void*)_sys_open,
     };
 
     syscall_table[SYS_CLOSE] = (syscall_entry_t){
         .ret_value_entry = RET_INT,
         .num_args = 1,
-        .handler.handler = (void*)sys_close,
+        .handler.handler = (void*)_sys_close,
     };
 
     syscall_table[SYS_GETPID] = (syscall_entry_t){

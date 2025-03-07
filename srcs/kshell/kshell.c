@@ -486,11 +486,12 @@ void kshell()
     int i = 0;
     command_t* commands;
     char* buffer;
-
+    // tty_init();
     set_keyboard_layout(QWERTY_ENG);
     while (1)
     {
         scheduler();
+        tty_save_to_file("/dev/tty");
         printf("jareste-OS> ");
         buffer = get_line();
 

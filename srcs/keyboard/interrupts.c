@@ -26,11 +26,10 @@ void page_fault_handler(registers* regs, error_state* stack)
     uint32_t faulting_address;
     __asm__ __volatile__("mov %%cr2, %0" : "=r"(faulting_address));
 
-
     task_t *task = get_current_task();
     if (task)
     {
-        printf("Task %d: ", task->pid);
+        printf("Task(%d) '%s': ", task->pid, task->name);
     }
     printf("Page fault at 0x");
     put_hex(faulting_address);
@@ -47,11 +46,10 @@ void page_fault_handler(registers* regs, error_state* stack)
     else printf("Kernel-mode\n");
 
 
-    // debug_page_mapping(faulting_address);
-    while(1);
-
-    NEVER_HERE;
-} /* PAGE FAULT HANDLER */
+    printf("Killing task %d due to page fault.\n", task->pid);
+    _exit(-1);  // or call kill_task() as appropriate
+}
+/* PAGE FAULT HANDLER */
 
 void isr_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_state stack)
 {
@@ -112,7 +110,7 @@ void irq_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_state
             kernel_panic("Unknown interrupt");
     }
 
-    enable_interrupts();
+    // enable_interrupts();
     // if (intr_no >= 8)
     // puts("#######################################################");
     if(intr_no >= 8) outb(0xA0, 0x20);

@@ -43,6 +43,7 @@ typedef long long int intmax_t;
 typedef unsigned long long int uintmax_t;
 
 typedef unsigned long size_t;
+typedef long ssize_t;
 
 /* uid gid euid */
 typedef unsigned int uid_t;

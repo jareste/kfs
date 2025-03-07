@@ -127,6 +127,7 @@ void keyboard_handler()
             key = get_ascii_char(scancode, shift_pressed);
             if (key)
             {
+                tty_write_ch(key);
                 putc(key);
                 set_kb_char(key);
             }

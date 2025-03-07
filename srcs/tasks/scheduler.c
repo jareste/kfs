@@ -8,7 +8,7 @@
 #include "../kshell/kshell.h"
 #include "../user/syscalls/stdlib.h"
 #include "../utils/queue.h"
-#include "../sockets/sockets.h"
+#include "../sockets/socket.h"
 
 #define STACK_SIZE 4096
 #define MAX_ACTIVE_TASKS 15
@@ -85,12 +85,24 @@ void free_envp(task_t* task)
     env_hashtable_destroy(task->env);
 }
 
+void close_all_fds(task_t* task)
+{
+    for (int i = 0; i < MAX_FDS; i++)
+    {
+        if (task->fd_table[i] == true)
+        {
+            sys_close(i);
+        }
+    }
+}
+
 void free_finished_tasks()
 {
     if (!to_free)
         return;
     dtach_from_childs(to_free);
     remove_from_father(to_free);
+    close_all_fds(to_free);
     free_envp(to_free);
     kfree((void*)to_free->kernel_stack);
     kfree((void*)to_free->stack);
@@ -361,6 +373,7 @@ void create_task(void (*entry)(void), char* name, void (*on_exit)(void))
     task->gid = 0;
     task->is_user = false;
     task->env = NULL; /* Kernel tasks don't need envp. */
+    memset(task->fd_table, 0, sizeof(task->fd_table));
     init_signals(task);
     add_new_task(task);
 }
@@ -432,11 +445,12 @@ void create_user_task(void (*entry)(char**), char* name, void (*on_exit)(void))
     memcpy(task->name, name, strlen(name) > 15 ? 15 : strlen(name));
     task->name[strlen(name) > 15 ? 15 : strlen(name)] = '\0';
     task->on_exit = on_exit;
-    task->entry = entry;
+    task->entry_env = entry;
     task->uid = 1000;
     task->euid = 1000;
     task->gid = 1000;
     task->is_user = true;
+    memset(task->fd_table, 0, sizeof(task->fd_table));
     init_signals(task);
     add_new_task(task);
 }
@@ -672,43 +686,60 @@ void task_2(void)
     }
 }
 
-void task_socket_send()
+void socket_1()
 {
-    // puts("Task SOCKSEND Started\n");
-    int i = 0;
-    i = 0;
-    int sockfd;
-    sockfd = _socket();
-    /* We assume this must be 0 */
-    // printf("Socket fd: %d\n", sockfd);
-    while (1)
-    {
-        socket_send(sockfd, "Hello, world!\n", 14);
 
+    int sock;
+    char* buffer = "Socket 1\n";
+
+    sock = sys_socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0)
+    {
+        puts_color("Error creating socket\n", RED);
+        return;
+    }
+    sys_bind(sock, "/foo/bar");
+
+    while(1)
+    {
+        write(sock, buffer, strlen(buffer));
         scheduler();
     }
+
 }
 
-void task_socket_recv()
+void socket_2()
 {
-    // puts("Task SOCKRECV Started\n");
+    int sock;
+    char buffer[10];
+    int return_value;
+    char* err_str = "Error reading\n";
+    char* read_str = "Read: ";
 
-    int sockfd;
-    sockfd = socket_connect(0);
-    // printf("Socket fd: %d\n", sockfd);
-    while (1)
+    sock = sys_connect("/foo/bar");
+    if (sock < 0)
     {
-        char buffer[16];
-        socket_recv(sockfd, buffer, sizeof(buffer));
-        // puts_color("Received: ", GREEN);
-        // puts_color(buffer, GREEN);
-        // putc('\n');
-        // puts("Task 4\n");
-        // if (i % 1000 == 0)
-        // {
-        scheduler();
-        // }
+        puts_color("Error creating socket\n", RED);
+        return;
     }
+
+    while(1)
+    {
+        return_value = read(sock, buffer, sizeof(buffer));
+        if (return_value < 0)
+        {
+            // enable_print();
+            puts_color(err_str, RED);
+        }
+        // else if (return_value > 0)
+        // {
+        //     buffer[return_value] = '\0';
+        //     puts_color(read_str, GREEN);
+        //     puts_color(buffer, GREEN);
+        // }
+        scheduler();
+    }
+
 }
 
 void recursion()
@@ -727,45 +758,86 @@ void test_recursion(void)
 
 void task_read()
 {
-    // printf("Task 4 Started\n");
-    int i;
-    i = _fork();
-    // printf("Forked: %d\n", i);
-    if (i == 0)
+    printf("Task 4 Started\n");
+    int fd;
+    char buffer[11];
+    int return_value;
+    char* buffer_filler = "Task read\n";
+    memcpy(buffer, buffer_filler, 10);
+    buffer[10] = '\0';
+    char* read_str = "Read :";
+    char* err_str = "Error reading\n";
+    char* cmp_buff = "Task read\n";
+    char* filename = "/boot/task_read";
+    char* pointer = "%p '%s'\n";
+    char* fd_str = "fd: %d\n";
+
+    // while (1) scheduler();
+    return_value = fork();
+    if (return_value == 0)
     {
-        // printf("My parent is %d\n", current_task->parent->pid);
-        set_current_uid(1);
-        set_current_euid(1);
-        set_current_gid(1);
+        fd_str = "Child process: %d\n";
+        printf(fd_str, return_value);
     }
     else
     {
-        // printf("My child is %d\n", current_task->children->task->pid);
+        fd_str = "Parent process: %d\n";
+        printf(fd_str, return_value);
     }
-    // printf("Task uid: %d, euid: %d. guid: %d\n", get_current_uid(), get_current_euid(), get_current_gid());
-    signal(2, task_1_sighandler);
+    fd_str = "fd: %d\n";
+    fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC);
+    if (fd < 0)
+    {
+        puts_color("Failed to open /boot/task_read\n", RED);
+        return;
+    }
+
+    printf(fd_str, fd);
+
+    write(fd, buffer, 10);
+    close(fd);
+
+    memset(buffer, 0, sizeof(buffer));
+    // while (1)
+    // {
+        // fd = open("/boot/task_read", O_RDONLY);
+        // printf("fd------: %d\n", fd);
+        // if (fd < 0)
+        // {
+        //     puts_color("Failed to open /boot/task_read\n", RED);
+        //     return;
+        // }
+
+
     while (1)
     {
-        // char buffer[10];
-        // int return_value;
+        fd = open(filename, O_RDONLY);
+        if (fd < 0)
+        {
+            puts_color("Failed to open /boot/task_read\n", RED);
+            return;
+        }
+        return_value = read(fd, buffer, sizeof(buffer));
         // return_value = read(0, buffer, sizeof(buffer));
-        // // return_value = write(3, buffer, return_value); // error writing to fd 3
-        // if (return_value <= 0)
-        // {
-        //     puts_color("Error reading\n", RED);
-        // }
-        // puts_color("Task 4\n", LIGHT_MAGENTA);
+        // return_value = write(3, buffer, return_value); // error writing to fd 3
+        if (return_value <= 0)
+        {
+            puts_color("Error reading\n", RED);
+        }
+        else
+        {
+            // buffer[return_value] = '\0';
+            if (strcmp(buffer, buffer_filler) != 0)
+            {
+                puts_color(err_str, RED);
+            }
+            // puts_color(read_str, GREEN);
+            // puts_color(buffer, GREEN);
+        }
+        close(fd);
         yeld();
-        // else
-        // {
-        //     buffer[return_value] = '\0';
-        //     puts_color("Read: ", GREEN);
-        //     puts_color(buffer, GREEN);
-        //     puts_color("\n", GREEN);
-        //     printf("Current task: %p\n", current_task);
-        // }
-        scheduler();
     }
+
 }
 
 void task_wait()
@@ -801,11 +873,9 @@ void user_task()
 
 void unsleep_kshell()
 {
-    // puts("Unsleeping kshell\n");
     /* Assuming kshell it's allways 1. */
     task_t *kshell = get_task_by_pid(1);
     kshell->state = TASK_READY;
-    force_no_syscall();
 }
 
 void start_user()
@@ -818,12 +888,12 @@ void start_foo_tasks(void)
 {
     create_task(kshell, "kshell", NULL);
     create_task(task_wait, "task_wait", NULL);
-    create_task(task_1, "task_1", task_1_exit);
+    // create_task(task_1, "task_1", task_1_exit);
     create_task(task_read, "task_read", NULL);
     create_task(task_2, "task_2", task_2_exit);
-    create_task(task_socket_send, "task_socket_send", NULL);
-    create_task(task_socket_recv, "task_socket_recv", NULL);
-        
+    create_task(socket_1, "socket_1", NULL);
+    create_task(socket_2, "socket_2", NULL);
+
     to_free = NULL;
     // printf("current_task: %p\n", current_task);
 }
