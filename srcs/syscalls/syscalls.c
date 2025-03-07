@@ -116,13 +116,13 @@ int _sys_read(int fd, char* buf, size_t count)
 
 int _sys_open(const char* path, int flags)
 {
-    printf("Syscall: open(%s, %d)\n", path, flags);
+    // printf("Syscall: open(%s, %d)\n", path, flags);
     return sys_open(path, flags);
 }
 
 int _sys_close(int fd)
 {
-    printf("Syscall: close(%d)\n", fd);
+    // printf("Syscall: close(%d)\n", fd);
     return sys_close(fd);
 }
 
@@ -152,11 +152,6 @@ pid_t fork()
 }
 
 syscall_entry_t syscall_table[SYS_MAX_SYSCALL];
-
-void force_no_syscall()
-{
-    syscall_happening = false;
-}
 
 int syscall_handler(registers reg)
 {
@@ -213,7 +208,7 @@ int syscall_handler(registers reg)
             break;
     }
 
-    // scheduler();
+    scheduler();
 
     // syscall_happening = false;
     return ret_value.int_value;

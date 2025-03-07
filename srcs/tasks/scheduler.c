@@ -731,12 +731,12 @@ void socket_2()
             // enable_print();
             puts_color(err_str, RED);
         }
-        else if (return_value > 0)
-        {
-            buffer[return_value] = '\0';
-            puts_color(read_str, GREEN);
-            puts_color(buffer, GREEN);
-        }
+        // else if (return_value > 0)
+        // {
+        //     buffer[return_value] = '\0';
+        //     puts_color(read_str, GREEN);
+        //     puts_color(buffer, GREEN);
+        // }
         scheduler();
     }
 
@@ -773,7 +773,18 @@ void task_read()
     char* fd_str = "fd: %d\n";
 
     // while (1) scheduler();
-
+    return_value = fork();
+    if (return_value == 0)
+    {
+        fd_str = "Child process: %d\n";
+        printf(fd_str, return_value);
+    }
+    else
+    {
+        fd_str = "Parent process: %d\n";
+        printf(fd_str, return_value);
+    }
+    fd_str = "fd: %d\n";
     fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC);
     if (fd < 0)
     {
@@ -820,11 +831,11 @@ void task_read()
             {
                 puts_color(err_str, RED);
             }
-            puts_color(read_str, GREEN);
-            puts_color(buffer, GREEN);
+            // puts_color(read_str, GREEN);
+            // puts_color(buffer, GREEN);
         }
         close(fd);
-        scheduler();
+        yeld();
     }
 
 }
@@ -862,11 +873,9 @@ void user_task()
 
 void unsleep_kshell()
 {
-    // puts("Unsleeping kshell\n");
     /* Assuming kshell it's allways 1. */
     task_t *kshell = get_task_by_pid(1);
     kshell->state = TASK_READY;
-    force_no_syscall();
 }
 
 void start_user()

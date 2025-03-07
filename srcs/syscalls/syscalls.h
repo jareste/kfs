@@ -106,6 +106,5 @@ typedef enum {
 int syscall_handler(registers reg);
 
 void init_syscalls();
-void force_no_syscall();
 
 #endif // SYSCALLS_H
