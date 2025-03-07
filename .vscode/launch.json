@@ -1,0 +1,55 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug kernel with QEMU",
+      "type": "cppdbg",
+      "request": "launch",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "program": "${workspaceFolder}/kernel.bin",
+      "cwd": "${workspaceFolder}",
+      "args": [],
+      "targetArchitecture": "x86",
+      "customLaunchSetupCommands": [
+        {
+          "text": "target remote localhost:1234"
+        },
+        {
+          "text": "symbol-file ${workspaceFolder}/kernel.bin"
+        }
+      ],
+      "setupCommands": [
+        {
+          "description": "Enable Intel disassembly flavor",
+          "text": "set disassembly-flavor intel",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Ignore missing breakpoints on load",
+          "text": "set breakpoint pending on",
+          "ignoreFailures": true
+        }
+      ]
+    },
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "cppdbg",
+      "request": "launch",
+      "args": [],
+      "stopAtEntry": false,
+      "externalConsole": true,
+      "cwd": "c:/Users/jares/Documents/kfs-new_scope_ext2",
+      "program": "c:/Users/jares/Documents/kfs-new_scope_ext2/build/Debug/outDebug",
+      "MIMode": "gdb",
+      "miDebuggerPath": "gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
+    }
+  ]
+}
