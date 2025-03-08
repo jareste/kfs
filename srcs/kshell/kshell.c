@@ -2,7 +2,7 @@
 #include "../keyboard/keyboard.h"
 #include "../keyboard/signals.h"
 #include "../utils/utils.h"
-#include "../timers/timers.h"
+#include "../time/time.h"
 #include "../umgmnt/users.h"
 #include "../ide/fs.h"
 #include "kshell.h"
@@ -488,6 +488,7 @@ void kshell()
     char* buffer;
     // tty_init();
     set_keyboard_layout(QWERTY_ENG);
+    print_date();
     while (1)
     {
         scheduler();

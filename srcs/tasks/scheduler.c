@@ -152,6 +152,13 @@ void set_current_gid(gid_t gid)
     current_task->gid = gid;
 }
 
+void schedule_task_sleep(task_t* task, uint64_t seconds)
+{
+    task->state = TASK_SLEEPING;
+    task->wake_tick = seconds;
+    scheduler();
+}
+
 pid_t _wait(int* status)
 {
     data_t data;
@@ -183,6 +190,30 @@ task_t* get_task_by_pid(pid_t pid)
     return NULL;
 }
 
+void check_wake_up(task_t* task)
+{
+    if ((task->state == TASK_SLEEPING) && (get_tick_count() >= task->wake_tick))
+    {
+        task->state = TASK_READY;
+    }
+}
+
+task_t* get_next_task()
+{
+    task_t *current = current_task->next;
+    check_wake_up(current);
+    while (current->state == TASK_WAITING || current->state == TASK_SLEEPING)
+    {
+        current = current->next;
+        check_wake_up(current);
+        if (current->pid == 0)
+        {
+            current = current->next;
+        }
+    }
+    return current;
+}
+
 void scheduler(void)
 {
     if (!current_task)
@@ -194,7 +225,7 @@ void scheduler(void)
     
     free_finished_tasks();
 
-    task_t *next = current_task->next;
+    task_t *next = get_next_task();
 
     if (next->pid == 0)
     {
@@ -722,6 +753,10 @@ void socket_2()
         puts_color("Error creating socket\n", RED);
         return;
     }
+
+    printf("sleeping for 5 seconds '%d'\n", get_kuptime());
+    sleep(5);
+    printf("Woke up '%d'\n", get_kuptime());
 
     while(1)
     {

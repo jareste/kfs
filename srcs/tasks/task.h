@@ -14,6 +14,7 @@ typedef enum
     TASK_READY,
     TASK_ZOMBIE,
     TASK_WAITING,
+    TASK_SLEEPING,
     TASK_TO_DIE
 } task_state_t;
 
@@ -50,6 +51,7 @@ typedef struct task_struct
     uid_t euid;
     gid_t gid;
     bool is_user;
+    uint64_t wake_tick;
 
     file_t fd_pointers[MAX_FDS];
     bool fd_table[MAX_FDS];

@@ -1,7 +1,7 @@
 #include "../utils/stdint.h"
 #include "../display/display.h"
 #include "../io/io.h"
-#include "../timers/timers.h"
+#include "../time/time.h"
 #include "idt.h"
 #include "../memory/memory.h"
 #include "keyboard.h"

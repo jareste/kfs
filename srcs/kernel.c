@@ -2,7 +2,7 @@
 #include "keyboard/idt.h"
 #include "gdt/gdt.h"
 #include "kshell/kshell.h"
-#include "timers/timers.h"
+#include "time/time.h"
 #include "memory/memory.h"
 #include "keyboard/signals.h"
 #include "tasks/task.h"

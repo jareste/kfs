@@ -19,7 +19,7 @@ ISO_DIR = iso
 GRUB_DIR = $(ISO_DIR)/boot/grub
 
 vpath %.c $(SRC_DIR) $(SRC_DIR)/utils $(SRC_DIR)/display $(SRC_DIR)/keyboard $(SRC_DIR)/gdt \
-			$(SRC_DIR)/idt $(SRC_DIR)/kshell $(SRC_DIR)/io $(SRC_DIR)/timers $(SRC_DIR)/memory \
+			$(SRC_DIR)/idt $(SRC_DIR)/kshell $(SRC_DIR)/io $(SRC_DIR)/time $(SRC_DIR)/memory \
 			$(SRC_DIR)/syscalls $(SRC_DIR)/tasks $(SRC_DIR)/sockets $(SRC_DIR)/ide \
 			$(SRC_DIR)/umgmnt $(SRC_DIR)/user/ushell $(SRC_DIR)/display/tty
 
