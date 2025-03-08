@@ -92,7 +92,7 @@ run:
 
 	# qemu-system-i386 -kernel $(BIN_NAME) #-m 4096
 
-debug_qemu:
+debug:
 	qemu-system-i386 -kernel $(BIN_NAME) -s -S -drive file=disk.img,if=ide,index=0,media=disk,format=raw
 
 run_debug:
@@ -104,7 +104,7 @@ run_grub: build_iso
 run_release: release
 	qemu-system-i386 -cdrom $(RELEASE_NAME)
 
-debug:
+m_debug:
 	qemu-system-i386 -cdrom $(NAME) -d int,cpu_reset
 
 xorriso:

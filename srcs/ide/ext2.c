@@ -706,6 +706,12 @@ ssize_t sys_write(int fd, const void *buf, size_t count)
     file_t *file_obj;
     size_t n;
 
+    if (fd == 1)
+    {
+        puts(buf);
+        return count;
+    }
+
     current = get_current_task();
     if (fd < 0 || fd >= MAX_FDS || current->fd_table[fd] == false)
         return -1;

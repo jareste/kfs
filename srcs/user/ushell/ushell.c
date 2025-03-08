@@ -32,45 +32,46 @@ static builtin_t builtins[] = {
     {NULL, 0}
 };
 
+static char m_buffer[1024];
+
 char* readline(char* prompt)
 {
-    static char buffer[1024];
     int bytes_read;
+    char buffer[1024];
 
+    if (!prompt)
+        prompt = "$ ";
 
-    if (prompt)
-        write(1, prompt, strlen(prompt));
-    else
-        write(1, "$ ", 2);
+    write(1, prompt, strlen(prompt));
 
     memset(buffer, 0, 1024);
 
     bytes_read = read(0, buffer, 1024);
     if (bytes_read > 0)
     {
-        // buffer[bytes_read] = '\0';
+        memcpy(m_buffer, buffer, bytes_read);
+        m_buffer[bytes_read] = '\0';
     }
     else
     {
-        write(1, "read() failed\n", 14);
-        memset(buffer, 0, 1024);
+        /* error but honestly we not caring about for now */
     }
-    return buffer;
+    return m_buffer;
 }
 
-void exec_builtin(char** args, int argc)
+void exec_builtin(char** argv, int argc)
 {
     int i;
 
     i = 0;
     while (builtins[i].cmd != NULL)
     {
-        if (strcmp(args[0], builtins[i].cmd) == 0)
+        if (strcmp(argv[0], builtins[i].cmd) == 0)
         {
             switch (builtins[i].def)
             {
                 case ECHO:
-                    echo(args, argc);
+                    echo(argv, argc);
                     break;
                 case EXIT:
                     u_exit();
@@ -83,7 +84,7 @@ void exec_builtin(char** args, int argc)
         i++;
     }
 
-    printf("Command '%s' not found\n", args[0]);
+    printf("Command '%s' not found\n", argv[0]);
 }
 
 void ushell(char** envp)
@@ -137,20 +138,19 @@ void ushell(char** envp)
     _exit(1);
 }
 
-void echo(char** args, int argc)
+void echo(char** argv, int argc)
 {
+    char* separator = " ";
+    char* end = "\n";
     for (int i = 1; i < argc; i++)
     {
-        write(1, args[i], strlen(args[i]));
-        write(1, " ", 1);
+        write(1, argv[i], strlen(argv[i]));
+        write(1, separator, 1);
     }
-    write(1, "\n", 1);
+    write(1, end, 1);
 }
 
 void u_exit(void)
 {
-    // write(1, "Exiting ushell\n", 15);
-    // printf("PID: %d\n", get_pid());
-    // kill(get_pid(), 2);
     exit(0);
 }
