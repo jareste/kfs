@@ -57,6 +57,14 @@
   "C_Cpp_Runner.useLinkTimeOptimization": false,
   "C_Cpp_Runner.msvcSecureNoWarnings": false,
   "files.associations": {
-    "tty.h": "c"
+    "tty.h": "c",
+    "display.h": "c",
+    "*.tcc": "cpp",
+    "unordered_map": "cpp",
+    "istream": "cpp",
+    "numeric": "cpp",
+    "ostream": "cpp",
+    "sstream": "cpp",
+    "modules.h": "c"
   }
 }

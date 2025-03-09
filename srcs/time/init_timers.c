@@ -52,7 +52,7 @@ static uint32_t rtc_to_epoch(int year, int month, int day, int hour, int minute,
     return epoch;
 }
 
-void get_system_time(timespec_t* ts)
+static void call_rtc(int* full_year, int* month, int* day, int* hour, int* minute, int* second)
 {
     uint8_t sec_bcd;
     uint8_t min_bcd;
@@ -60,13 +60,7 @@ void get_system_time(timespec_t* ts)
     uint8_t day_bcd;
     uint8_t month_bcd;
     uint8_t year_bcd;
-    int second;
-    int minute;
-    int hour;
-    int day;
-    int month;
     int year;
-    int full_year;
 
     sec_bcd = rtc_read(0x00);
     min_bcd = rtc_read(0x02);
@@ -75,59 +69,59 @@ void get_system_time(timespec_t* ts)
     month_bcd = rtc_read(0x08);
     year_bcd = rtc_read(0x09);
 
-    second = bcd_to_bin(sec_bcd);
-    minute = bcd_to_bin(min_bcd);
-    hour = bcd_to_bin(hour_bcd);
-    day = bcd_to_bin(day_bcd);
-    month = bcd_to_bin(month_bcd);
+    *second = bcd_to_bin(sec_bcd);
+    *minute = bcd_to_bin(min_bcd);
+    *hour = bcd_to_bin(hour_bcd);
+    *day = bcd_to_bin(day_bcd);
+    *month = bcd_to_bin(month_bcd);
     year = bcd_to_bin(year_bcd);
 
     if (year < 70)
-        full_year = 2000 + year;
+        *full_year = 2000 + year;
     else
-        full_year = 1900 + year;
+        *full_year = 1900 + year;
+}
+
+void get_system_time(timespec_t* ts)
+{
+    int second;
+    int minute;
+    int hour;
+    int day;
+    int month;
+    int full_year;
+
+    call_rtc(&full_year, &month, &day, &hour, &minute, &second);
 
     ts->tv_sec = rtc_to_epoch(full_year, month, day, hour, minute, second);
     ts->tv_nsec = 0;
 }
 
+time_t time(time_t* tloc)
+{
+    timespec_t ts;
+    get_system_time(&ts);
+    if (tloc)
+        *tloc = ts.tv_sec;
+    return ts.tv_sec;
+}
+
 void print_date()
 {
     timespec_t ts;
-    uint8_t sec_bcd;
-    uint8_t min_bcd;
-    uint8_t hour_bcd;
-    uint8_t day_bcd;
-    uint8_t month_bcd;
-    uint8_t year_bcd;
     int second;
     int minute;
     int hour;
     int day;
     int month;
-    int year;
     int full_year;
 
-    sec_bcd = rtc_read(0x00);
-    min_bcd = rtc_read(0x02);
-    hour_bcd = rtc_read(0x04);
-    day_bcd = rtc_read(0x07);
-    month_bcd = rtc_read(0x08);
-    year_bcd = rtc_read(0x09);
-
-    second = bcd_to_bin(sec_bcd);
-    minute = bcd_to_bin(min_bcd);
-    hour = bcd_to_bin(hour_bcd);
-    day = bcd_to_bin(day_bcd);
-    month = bcd_to_bin(month_bcd);
-    year = bcd_to_bin(year_bcd);
-
-    if (year < 70)
-        full_year = 2000 + year;
-    else
-        full_year = 1900 + year;
+    call_rtc(&full_year, &month, &day, &hour, &minute, &second);
 
     printf("Current date: %d-%d-%d %d:%d:%d\n", full_year, month, day, hour, minute, second);
+    ts.tv_sec = rtc_to_epoch(full_year, month, day, hour, minute, second);
+    ts.tv_nsec = 0;
+    dispatch_time_request(&ts);
 }
 
 void sleep(uint32_t sleep_seconds)
@@ -144,11 +138,17 @@ void usleep(uint32_t sleep_microseconds)
 
 void irq_handler_timer()
 {
+    timespec_t ts;
+
     tick_count++;
     if ((tick_count % PIT_FREQUENCY) == 0)
     {
         seconds++;
+
+        get_system_time(&ts);
+        dispatch_time_request(&ts);
     }
+    dispatch_cpu_cycle();
     outb(PIC_EOI, PIC1_COMMAND);
 }
 

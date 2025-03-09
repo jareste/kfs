@@ -258,7 +258,7 @@ static int ext2_lookup(uint32_t dir_inode_num, const char *name, uint32_t *child
 {
     struct ext2_inode dir;
     ext2_read_inode(dir_inode_num, &dir);
-    if (!(dir.i_mode & 0x4000))
+    if (!(dir.i_mode & DIR_MODE))
     {  /* not a directory */
         printf("Not a directory\n");
         return -1;
@@ -288,7 +288,8 @@ static int ext2_lookup(uint32_t dir_inode_num, const char *name, uint32_t *child
     return -1;
 }
 
-static int ext2_resolve_path(const char *path, uint32_t *inode_out)
+/* used to be static. review */
+int ext2_resolve_path(const char *path, uint32_t *inode_out)
 {
     uint32_t cur = (path[0]=='/') ? EXT2_ROOT_INODE : current_dir;
     char token[256];
@@ -309,7 +310,8 @@ static int ext2_resolve_path(const char *path, uint32_t *inode_out)
     return 0;
 }
 
-static int ext2_create_file(uint32_t parent_inode_num, const char *name, uint16_t mode)
+/* used to be static. review */
+int ext2_create_file(uint32_t parent_inode_num, const char *name, uint16_t mode)
 {
     uint32_t new_inode = ext2_allocate_inode();
     if (new_inode == 0)
@@ -324,7 +326,7 @@ static int ext2_create_file(uint32_t parent_inode_num, const char *name, uint16_
     file.i_links_count = 1;
     file.i_blocks = 0;
     ext2_write_inode(new_inode, &file);
-    if (ext2_add_dir_entry(parent_inode_num, name, new_inode, (mode & 0x4000) ? EXT2_FT_DIR : EXT2_FT_REG_FILE) < 0)
+    if (ext2_add_dir_entry(parent_inode_num, name, new_inode, (mode & DIR_MODE) ? EXT2_FT_DIR : EXT2_FT_REG_FILE) < 0)
         return -1;
     return new_inode;
 }
@@ -477,7 +479,7 @@ ext2_FILE *ext2_fopen(const char *path, const char *mode)
             printf("ext2_fopen: parent directory not found '%s'\n", parent_path);
             return NULL;
         }
-        uint32_t new_inode = ext2_create_file(parent_inode, file_name, 0x8000);
+        uint32_t new_inode = ext2_create_file(parent_inode, file_name, FILE_MODE);
         if (!new_inode)
         {
             printf("ext2_fopen: cannot create file '%s'\n", path);
@@ -488,7 +490,7 @@ ext2_FILE *ext2_fopen(const char *path, const char *mode)
 
     struct ext2_inode in;
     ext2_read_inode(inode_num, &in);
-    if (in.i_mode & 0x4000)
+    if (in.i_mode & DIR_MODE)
     {
         printf("ext2_fopen: '%s' is a directory\n", path);
         return NULL;
@@ -646,6 +648,10 @@ int sys_open(const char *path, int flags)
         return -1;
 
     /* Fill the file_t structure in the task's fd_pointers array */
+    if (fp->inode.i_mode & DEVICE_MODE)
+        current->fd_pointers[fd].type = FD_MODULE;
+    else
+        current->fd_pointers[fd].type = FD_FILE;
     current->fd_pointers[fd].flags = flags;
     current->fd_pointers[fd].file = fp;
     current->fd_pointers[fd].offset = fp->pos;
@@ -694,6 +700,24 @@ ssize_t sys_read(int fd, void *buf, size_t count)
     {
         return socket_recv(file_obj->socket, buf, count);
     }
+    else if (file_obj->type == FD_MODULE)
+    {
+        int mod_num;
+        n = ext2_fread(&mod_num, 4, 1, file_obj->file);
+        /* TODO
+         * With modnum, simply call the read function of the module
+         */
+        module_t *mod = file_obj->module;
+
+        if (mod && mod->read)
+        {
+            size_t offset = file_obj->offset;
+            mod->read(mod, buf, count, &offset);
+            file_obj->offset = offset;
+            return count;
+        }
+        return -1;
+    }
 
     n = ext2_fread(buf, 1, count, file_obj->file);
     file_obj->offset = file_obj->file->pos;
@@ -738,7 +762,7 @@ void ext2_cmd_ls(const char *path)
     }
     struct ext2_inode dir;
     ext2_read_inode(inode_num, &dir);
-    if (!(dir.i_mode & 0x4000))
+    if (!(dir.i_mode & DIR_MODE))
     {
         printf("Not a directory\n");
         return;
@@ -773,7 +797,7 @@ void ext2_cmd_cat(const char *path)
     }
     struct ext2_inode file;
     ext2_read_inode(inode_num, &file);
-    if (file.i_mode & 0x4000)
+    if (file.i_mode & DIR_MODE)
     {
         printf("Is a directory\n");
         return;
@@ -821,7 +845,7 @@ void ext2_cmd_touch(const char *path)
         printf("Parent directory not found\n");
         return;
     }
-    ext2_create_file(parent, file_name, 0x8000);
+    ext2_create_file(parent, file_name, FILE_MODE);
 }
 
 void ext2_cmd_mkdir(const char *path)
@@ -867,7 +891,7 @@ void ext2_cmd_mkdir(const char *path)
     }
     struct ext2_inode dir;
     memset(&dir, 0, sizeof(dir));
-    dir.i_mode = 0x4000;  /* directory */
+    dir.i_mode = DIR_MODE;  /* directory */
     dir.i_size = EXT2_BLOCK_SIZE;
     dir.i_links_count = 2; /* . and .. */
     uint32_t block = ext2_allocate_block();
@@ -909,7 +933,7 @@ void ext2_cmd_rm(const char *path)
     }
     struct ext2_inode file;
     ext2_read_inode(inode_num, &file);
-    if (file.i_mode & 0x4000)
+    if (file.i_mode & DIR_MODE)
     {
         printf("Is a directory – use rmdir\n");
         return;
@@ -952,7 +976,7 @@ void ext2_cmd_rmdir(const char *path)
     }
     struct ext2_inode dir;
     ext2_read_inode(inode_num, &dir);
-    if (!(dir.i_mode & 0x4000))
+    if (!(dir.i_mode & DIR_MODE))
     {
         printf("Not a directory\n");
         return;
@@ -1011,7 +1035,7 @@ void ext2_cmd_cd(const char *path)
     }
     struct ext2_inode inode;
     ext2_read_inode(inode_num, &inode);
-    if (!(inode.i_mode & 0x4000))
+    if (!(inode.i_mode & DIR_MODE))
     {
         printf("Not a directory\n");
         return;
@@ -1031,7 +1055,7 @@ void ext2_cmd_cp(const char *src_path, const char *dst_path)
     struct ext2_inode src_inode;
     ext2_read_inode(src_inode_num, &src_inode);
 
-    if (src_inode.i_mode & 0x4000)
+    if (src_inode.i_mode & DIR_MODE)
     {
         printf("cp: source is a directory (not supported)\n");
         return;
@@ -1057,7 +1081,7 @@ void ext2_cmd_cp(const char *src_path, const char *dst_path)
         return;
     }
 
-    uint32_t new_inode_num = ext2_create_file(parent_inode_num, file_name, 0x8000 /* regular file */);
+    uint32_t new_inode_num = ext2_create_file(parent_inode_num, file_name, FILE_MODE /* regular file */);
     if (new_inode_num == 0)
     {
         printf("cp: failed to create destination file: %s\n", dst_path);
@@ -1120,7 +1144,7 @@ void ext2_cmd_mv(const char *src_path, const char *dst_path)
 
     struct ext2_inode src_inode;
     ext2_read_inode(src_inode_num, &src_inode);
-    uint8_t file_type = (src_inode.i_mode & 0x4000) ? EXT2_FT_DIR : EXT2_FT_REG_FILE;
+    uint8_t file_type = (src_inode.i_mode & DIR_MODE) ? EXT2_FT_DIR : EXT2_FT_REG_FILE;
     if (ext2_add_dir_entry(dst_parent_inode, dst_name, src_inode_num, file_type) < 0)
     {
         printf("mv: failed to create destination entry\n");

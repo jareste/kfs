@@ -9,6 +9,7 @@
 #include "ide/ide.h"
 #include "ide/ext2.h"
 #include "syscalls/syscalls.h"
+#include "modules/modules.h"
 
 #include "umgmnt/users.h"
 
@@ -39,12 +40,17 @@ void kernel_main()
 
     init_syscalls();
 
+
     tty_init();
     // kshell(); /* Uncomment this line to not run the scheduler */
     scheduler_init();
     start_foo_tasks();
 
     enable_print();
+    register_time_module();
+    register_keyboard_module();
+
+
     scheduler();
 
     /* Keep CPU busy */

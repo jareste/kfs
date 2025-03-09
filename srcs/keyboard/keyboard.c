@@ -75,6 +75,7 @@ void keyboard_handler()
 {
     uint8_t scancode = inb(KEYBOARD_DATA_PORT);
     char key = 0;
+    bool key_released = scancode & 0x80;
 
     switch (scancode)
     {
@@ -133,5 +134,9 @@ void keyboard_handler()
             }
     }
 
+    if (key_released)
+        dispatch_key_event(scancode &= 0x7F, key_released);
+    else
+        dispatch_key_event(scancode, key_released);
     outb(PIC1_COMMAND, PIC_EOI);
 }

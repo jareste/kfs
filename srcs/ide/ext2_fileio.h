@@ -4,6 +4,7 @@
 #include "../utils/stdint.h"
 #include "../utils/utils.h"
 #include "../sockets/socket.h"
+#include "../modules/modules.h"
 #include "ext2.h"
 
 #define MAX_FDS 32
@@ -13,6 +14,10 @@
 #define O_CREAT 4
 #define O_TRUNC 8
 #define O_APPEND 16
+#define FILE_MODE    0x8000   // Regular file (S_IFREG)
+#define DIR_MODE     0x4000   // Directory (S_IFDIR)
+#define DEVICE_MODE  0x2000   // Character device (S_IFCHR)
+
 
 typedef struct ext2_FILE
 {
@@ -22,7 +27,7 @@ typedef struct ext2_FILE
     int mode;                   /* 0=read, 1=write (for simplicity) */
 } ext2_FILE;
 
-typedef enum { FD_FILE, FD_SOCKET } fd_type_t;
+typedef enum { FD_FILE = 0, FD_SOCKET, FD_MODULE } fd_type_t;
 
 typedef struct file
 {
@@ -34,6 +39,7 @@ typedef struct file
     {
         ext2_FILE*  file;
         socket_t*   socket;
+        module_t*   module;
     };
 } file_t;
 

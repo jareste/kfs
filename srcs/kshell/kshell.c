@@ -8,6 +8,8 @@
 #include "kshell.h"
 #include "../../srcs/user/syscalls/stdlib.h"
 
+#include "../ide/ext2_fileio.h"
+
 #define MAX_COMMANDS 256
 #define MAX_SECTIONS_COMMANDS 25
 #define MAX_SECTIONS SECTION_T_MAX
@@ -41,6 +43,8 @@ static void set_layout();
 static void ks_signal();
 static void ks_get_pid();
 
+static void ks_read_mod_kb();
+
 static command_section_t command_sections[MAX_SECTIONS];
 
 static command_t global_commands[] = {
@@ -51,6 +55,7 @@ static command_t global_commands[] = {
     {"clear", "Clear the screen", clear_screen},
     {"shutdown", "Shutdown the system", shutdown},
     {"sec", "Change the command section", cmd_section},
+    {"readmodkb", "Read from the keyboard module", ks_read_mod_kb},
     {NULL, NULL, NULL}    
 };
 
@@ -479,6 +484,24 @@ void test_syscall()
     printf("SYS_WRITE return value: %d\n", return_value);
     
     test_syscall_read();
+}
+
+static void ks_read_mod_kb()
+{
+    char buffer[256];
+    size_t offset = 0;
+    size_t n;
+    int fd;
+    puts_color("Reading from keyboard module...\n", LIGHT_MAGENTA);
+    while (1)
+    {
+        fd = sys_open("/dev/keyboard_module", O_RDONLY);
+        n = sys_read(fd, buffer, sizeof(buffer) - 1);
+        buffer[n] = 0;
+        printf("Read from keyboard module: '%s'\n", buffer);
+        if (strcmp(buffer, "exit") == 0)
+            break;
+    }
 }
 
 void kshell()
