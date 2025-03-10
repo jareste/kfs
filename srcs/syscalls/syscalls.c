@@ -4,6 +4,7 @@
 #include "../tasks/task.h"
 #include "../keyboard/signals.h"
 #include "../keyboard/keyboard.h"
+#include "../time/time.h"
 
 typedef int (*syscall_handler_6_t)(uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4, uint32_t arg5, uint32_t arg6);
 typedef int (*syscall_handler_5_t)(uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4, uint32_t arg5);
@@ -20,6 +21,7 @@ typedef enum
     RET_INT = 0,
     RET_PTR = 1,
     RET_SIZE = 2,
+    RET_VOID = 3,
 } ret_value_size;
 
 typedef union
@@ -94,11 +96,6 @@ int sys_get_pid()
     return get_current_task()->pid;
 }
 
-void sys_sleep(uint32_t seconds)
-{
-    printf("Syscall: sleep(%d)\n", seconds);
-}
-
 int sys_kill(uint32_t pid, uint32_t signal)
 {
     return _kill(pid, signal);
@@ -109,9 +106,24 @@ int sys_signal(uint32_t pid, signal_handler_t hand)
     return _signal(pid, hand);
 }
 
-pid_t fork()
+pid_t sys_fork()
 {
     return _fork();
+}
+
+void sys_usleep(uint32_t microseconds)
+{
+    _usleep(microseconds);
+}
+
+void sys_sleep(uint32_t seconds)
+{
+    _sleep(seconds);
+}
+
+time_t sys_time(time_t* tloc)
+{
+    return _time(tloc);
 }
 
 syscall_entry_t syscall_table[SYS_MAX_SYSCALL];
@@ -240,4 +252,35 @@ void init_syscalls()
         .num_args = 0,
         .handler.handler = (void*)scheduler,
     };
+
+    syscall_table[SYS_FORK] = (syscall_entry_t){
+        .ret_value_entry = RET_INT,
+        .num_args = 0,
+        .handler.handler = (void*)sys_fork,
+    };
+
+    // syscall_table[SYS_GETTIMEOFDAY] = (syscall_entry_t){
+    //     .ret_value_entry = RET_INT,
+    //     .num_args = 0,
+    //     .handler.handler = (void*)get_kuptime,
+    // };
+
+    syscall_table[SYS_NANOSLEEP] = (syscall_entry_t){
+        .ret_value_entry = RET_VOID,
+        .num_args = 1,
+        .handler.handler = (void*)sys_usleep,
+    };
+
+    syscall_table[SYS_SLEEP] = (syscall_entry_t){
+        .ret_value_entry = RET_VOID,
+        .num_args = 1,
+        .handler.handler = (void*)sys_sleep,
+    };
+
+    syscall_table[SYS_TIME] = (syscall_entry_t){
+        .ret_value_entry = RET_INT,
+        .num_args = 1,
+        .handler.handler = (void*)sys_time,
+    };
+
 }

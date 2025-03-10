@@ -98,8 +98,14 @@ typedef enum {
     SYS_MMAP = 90,
     SYS_MUNMAP = 91,
     SYS_WAIT4 = 114,
+    // ... CUSTOM SYSCALLS
     SYS_SCHED_YIELD = 158,
-    SYS_MAX_SYSCALL = 160,
+    // ...
+    SYS_GETTIMEOFDAY = 169,
+    SYS_NANOSLEEP = 170,
+    SYS_SLEEP = 171,
+    // SYS_TIME = 174,
+    SYS_MAX_SYSCALL = 175,
 
 } syscalls_num;
 

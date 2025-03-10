@@ -40,7 +40,7 @@ C_SOURCES = kernel.c strcmp.c strlen.c printf.c putc.c puts.c keyboard.c \
 ASM_SOURCES = boot.asm handler.asm gdt_asm.asm dump_registers.asm \
 			  clear_registers.asm tasks.asm write.asm kill.asm \
 			  read.asm signal.asm get_pid.asm sys_yeld.asm exit.asm \
-			  close.asm open.asm
+			  close.asm open.asm sleep.asm fork.asm time.asm usleep.asm
 
 SRC = $(C_SOURCES) $(ASM_SOURCES)
 

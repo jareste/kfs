@@ -11,12 +11,18 @@
 #define MAX_SECTIONS SECTION_T_MAX
 
 void echo(char** args, int argc);
-void u_exit(void);
+void u_exit(char** argv, int argc);
+void u_sleep(char** argv, int argc);
+void u_usleep(char** argv, int argc);
+void u_time(char** argv, int argc);
 
 typedef enum
 {
     ECHO = 0,
     EXIT,
+    USLEEP,
+    SLEEP,
+    TIME,
     BUILTIN_MAX
 } builtin_def;
 
@@ -26,9 +32,19 @@ typedef struct
     builtin_def def;
 } builtin_t;
 
+typedef struct
+{
+    void (*handler)(char**, int);
+} user_cmd_t;
+
+static user_cmd_t user_cmds[BUILTIN_MAX];
+
 static builtin_t builtins[] = {
     {"echo", ECHO},
     {"exit", EXIT},
+    {"usleep", USLEEP},
+    {"sleep", SLEEP},
+    {"time", TIME},
     {NULL, 0}
 };
 
@@ -44,18 +60,14 @@ char* readline(char* prompt)
 
     write(1, prompt, strlen(prompt));
 
-    memset(buffer, 0, 1024);
+    memset(m_buffer, 0, 1024);
 
     bytes_read = read(0, buffer, 1024);
-    if (bytes_read > 0)
-    {
-        memcpy(m_buffer, buffer, bytes_read);
-        m_buffer[bytes_read] = '\0';
-    }
-    else
-    {
-        /* error but honestly we not caring about for now */
-    }
+    if (bytes_read <= 0)
+        return NULL;
+
+    memcpy(m_buffer, buffer, bytes_read);
+    m_buffer[bytes_read] = '\0';
     return m_buffer;
 }
 
@@ -68,17 +80,19 @@ void exec_builtin(char** argv, int argc)
     {
         if (strcmp(argv[0], builtins[i].cmd) == 0)
         {
-            switch (builtins[i].def)
-            {
-                case ECHO:
-                    echo(argv, argc);
-                    break;
-                case EXIT:
-                    u_exit();
-                    break;
-                default:
-                    break;
-            }
+
+            user_cmds[builtins[i].def].handler(argv, argc);
+            // switch (builtins[i].def)
+            // {
+            //     case ECHO:
+            //         echo(argv, argc);
+            //         break;
+            //     case EXIT:
+            //         u_exit(argv, argc);
+            //         break;
+            //     default:
+            //         break;
+            // }
             return;
         }
         i++;
@@ -96,6 +110,12 @@ void ushell(char** envp)
     int len;
     int i;
 
+    user_cmds[ECHO].handler = echo;
+    user_cmds[EXIT].handler = u_exit;
+    user_cmds[USLEEP].handler = u_usleep;
+    user_cmds[SLEEP].handler = u_sleep;
+    user_cmds[TIME].handler = u_time;
+
     printf("Welcome to ushell\n");
     // print_env(); /* DEBUG */
     i = 0;
@@ -108,9 +128,7 @@ void ushell(char** envp)
     while (1)
     {
         buffer = readline(NULL);
-
-        len = strlen(buffer);
-        if (len == 0)
+        if (!buffer)
             continue;
 
         token_count = 0;
@@ -150,7 +168,60 @@ void echo(char** argv, int argc)
     write(1, end, 1);
 }
 
-void u_exit(void)
+void u_exit(char** argv, int argc)
 {
+    (void)argv;
+    (void)argc;
     exit(0);
+}
+
+int atoi(const char* str)
+{
+    int res = 0;
+    int i = 0;
+    int sign = 1;
+
+    if (str[0] == '-')
+    {
+        sign = -1;
+        i++;
+    }
+
+    for (; str[i] != '\0'; i++)
+    {
+        res = res * 10 + str[i] - '0';
+    }
+
+    return sign * res;
+}
+
+void u_sleep(char** argv, int argc)
+{
+    if (argc < 2)
+    {
+        printf("Invalid number of arguments for sleep\n");
+        return;
+    }
+
+    sleep(atoi(argv[1]));
+}
+
+void u_usleep(char** argv, int argc)
+{
+    if (argc < 2)
+    {
+        printf("Invalid number of arguments for usleep\n");
+        return;
+    }
+
+    usleep(atoi(argv[1]));
+}
+
+void u_time(char** argv, int argc)
+{
+    (void)argv;
+    (void)argc;
+    time_t t;
+    time(&t);
+    printf("Current time: %d\n", t);
 }

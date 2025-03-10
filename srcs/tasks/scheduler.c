@@ -756,7 +756,6 @@ void socket_2()
 
     printf("sleeping for 5 seconds '%d'\n", get_kuptime());
     sleep(5);
-    printf("Woke up '%d'\n", get_kuptime());
 
     while(1)
     {
@@ -807,19 +806,7 @@ void task_read()
     char* pointer = "%p '%s'\n";
     char* fd_str = "fd: %d\n";
 
-    // while (1) scheduler();
-    return_value = fork();
-    if (return_value == 0)
-    {
-        fd_str = "Child process: %d\n";
-        printf(fd_str, return_value);
-    }
-    else
-    {
-        fd_str = "Parent process: %d\n";
-        printf(fd_str, return_value);
-    }
-    fd_str = "fd: %d\n";
+    fd_str = "fd: '%d'\n";
     fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC);
     if (fd < 0)
     {

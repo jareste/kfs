@@ -24,19 +24,20 @@ typedef struct tm
 
 void init_timer();
 void irq_handler_timer();
-void sleep(uint32_t seconds);
+// void sleep(uint32_t seconds);
 uint64_t get_kuptime();
 
 void init_time();
 
-void sleep(uint32_t seconds);
+void _usleep(uint32_t sleep_microseconds);
+void _sleep(uint32_t seconds);
 
 uint64_t get_uptime();
 
 void get_system_time(timespec_t* ts);
 void set_system_time(const timespec_t* ts);
 
-time_t time(time_t* tloc);
+time_t _time(time_t* tloc);
 
 uint32_t get_tick_count();
 

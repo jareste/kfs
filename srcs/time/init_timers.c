@@ -97,7 +97,7 @@ void get_system_time(timespec_t* ts)
     ts->tv_nsec = 0;
 }
 
-time_t time(time_t* tloc)
+time_t _time(time_t* tloc)
 {
     timespec_t ts;
     get_system_time(&ts);
@@ -124,13 +124,13 @@ void print_date()
     dispatch_time_request(&ts);
 }
 
-void sleep(uint32_t sleep_seconds)
+void _sleep(uint32_t sleep_seconds)
 {
     uint64_t wake_tick = tick_count + SECONDS_TO_TICKS(sleep_seconds);
     schedule_task_sleep(get_current_task(), wake_tick);
 }
 
-void usleep(uint32_t sleep_microseconds)
+void _usleep(uint32_t sleep_microseconds)
 {
     uint64_t wake_tick = tick_count + sleep_microseconds / 1000;
     schedule_task_sleep(get_current_task(), wake_tick);
