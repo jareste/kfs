@@ -81,17 +81,6 @@ void exec_builtin(char** argv, int argc)
         {
 
             user_cmds[builtins[i].def].handler(argv, argc);
-            // switch (builtins[i].def)
-            // {
-            //     case ECHO:
-            //         echo(argv, argc);
-            //         break;
-            //     case EXIT:
-            //         u_exit(argv, argc);
-            //         break;
-            //     default:
-            //         break;
-            // }
             return;
         }
         i++;

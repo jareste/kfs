@@ -310,6 +310,76 @@ int ext2_resolve_path(const char *path, uint32_t *inode_out)
     return 0;
 }
 
+int ext2_remove_all_files(const char *dir_path)
+{
+    uint32_t dir_inode_num;
+    if (ext2_resolve_path(dir_path, &dir_inode_num) < 0)
+    {
+        printf("ext2_remove_all_files: directory not found: %s\n", dir_path);
+        return -1;
+    }
+
+    struct ext2_inode dir_inode;
+    ext2_read_inode(dir_inode_num, &dir_inode);
+    if (!(dir_inode.i_mode & DIR_MODE))
+    {
+        printf("ext2_remove_all_files: %s is not a directory\n", dir_path);
+        return -1;
+    }
+
+    if (dir_inode.i_block[0] == 0)
+    {
+        return 0;
+    }
+
+    uint8_t *blockbuf = kmalloc(EXT2_BLOCK_SIZE);
+    ext2_read_block(dir_inode.i_block[0], blockbuf);
+
+    char *file_names[32];
+    int file_count = 0;
+    int offset = 0;
+
+    while (offset < EXT2_BLOCK_SIZE)
+    {
+        struct ext2_dir_entry *de = (struct ext2_dir_entry *)(blockbuf + offset);
+        if (de->inode != 0)
+        {
+            char name[256];
+            memcpy(name, de->name, de->name_len);
+            name[de->name_len] = '\0';
+            if (strcmp(name, ".") != 0 && strcmp(name, "..") != 0)
+            {
+                if (de->file_type == EXT2_FT_REG_FILE)
+                {
+                    if (file_count < 32)
+                        file_names[file_count++] = kstrdup(name);
+                    else
+                    {
+                        printf("ext2_remove_all_files: too many files; increase array size\n");
+                        break;
+                    }
+                }
+            }
+        }
+        offset += de->rec_len;
+    }
+    kfree(blockbuf);
+
+    for (int i = 0; i < file_count; i++)
+    {
+        char full_path[256];
+        strcpy(full_path, dir_path);
+        if (dir_path[strlen(dir_path) - 1] != '/')
+            strcat(full_path, "/");
+        strcat(full_path, file_names[i]);
+        ext2_cmd_rm(full_path);
+        kfree(file_names[i]);
+    }
+
+    return 0;
+}
+
+
 /* used to be static. review */
 int ext2_create_file(uint32_t parent_inode_num, const char *name, uint16_t mode)
 {

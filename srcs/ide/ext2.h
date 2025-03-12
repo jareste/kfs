@@ -99,4 +99,6 @@ uint32_t ext2_get_inode(const char *path);
 
 void set_current_dir(uint32_t inode);
 
+int ext2_remove_all_files(const char *dir_path);
+
 #endif

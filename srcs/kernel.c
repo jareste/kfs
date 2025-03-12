@@ -47,6 +47,7 @@ void kernel_main()
     start_foo_tasks();
 
     enable_print();
+    ext2_remove_all_files("/dev");
     register_time_module();
     register_keyboard_module();
 
