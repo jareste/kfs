@@ -48,12 +48,11 @@ static builtin_t builtins[] = {
     {NULL, 0}
 };
 
-static char m_buffer[1024];
-
 char* readline(char* prompt)
 {
     int bytes_read;
     char buffer[1024];
+    static char m_buffer[1024];
 
     if (!prompt)
         prompt = "$ ";
@@ -105,7 +104,6 @@ void ushell(char** envp)
 {
     char* buffer;
     char* tokens[MAX_TOKENS];
-    // char* p;
     int token_count;
     int len;
     int i;
@@ -134,7 +132,7 @@ void ushell(char** envp)
         token_count = 0;
 
         i = 0;
-        while (i < len && token_count < MAX_TOKENS)
+        while (buffer[i] && token_count < MAX_TOKENS)
         {
             tokens[token_count++] = &buffer[i];
             while (buffer[i] != ' ' && buffer[i] != '\0') i++;
@@ -146,12 +144,8 @@ void ushell(char** envp)
             }
         }
 
-        if (tokens[0][0] == 'q')
-        {
-            break;
-        }
-
-        exec_builtin(tokens, token_count);
+        if (token_count > 0)
+            exec_builtin(tokens, token_count);
     }
     _exit(1);
 }
