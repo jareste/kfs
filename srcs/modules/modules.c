@@ -6,39 +6,38 @@
 static module_t* registered_modules[MAX_MODULES];
 static int module_count = 0;
 
-int create_device_node(const char *dir, const char *name, module_t *module)
-{
-    char path[256];
+// int create_device_node(const char *dir, const char *name, module_t *module)
+// {
+//     char path[256];
 
-    strcpy(path, dir);
-    strcat(path, "/");
-    strcat(path, name);
+//     strcpy(path, dir);
+//     strcat(path, "/");
+//     strcat(path, name);
 
-    uint32_t parent_inode;
-    if (ext2_resolve_path(dir, &parent_inode) < 0)
-    {
-        printf("ext2_fopen: parent directory not found '%s'\n", dir);
-        return NULL;
-    }
-    /* Maybe create better a wrapper for this
-     */
-    int inode_num = ext2_create_file(parent_inode, name, DEVICE_MODE);
-    if (inode_num == -1)
-    {
-        printf("create_device_node: failed to create file %s\n", path);
-        return -1;
-    }
+//     uint32_t parent_inode;
+//     if (ext2_resolve_path(dir, &parent_inode) < 0)
+//     {
+//         printf("ext2_fopen: parent directory not found '%s'\n", dir);
+//         return NULL;
+//     }
+//     /* Maybe create better a wrapper for this
+//      */
+//     int inode_num = ext2_create_file(parent_inode, name, DEVICE_MODE);
+//     if (inode_num == -1)
+//     {
+//         printf("create_device_node: failed to create file %s\n", path);
+//         return -1;
+//     }
 
-    ext2_FILE *file = ext2_fopen(path, "w");
-    if (!file)
-    {
-        printf("create_device_node: failed to open file %s\n", path);
-        return -1;
-    }
-    ext2_fwrite(&module->module_id, sizeof(module->module_id), 1, file);
-    ext2_fclose(file);
-
-}
+//     ext2_FILE *file = ext2_fopen(path, "w");
+//     if (!file)
+//     {
+//         printf("create_device_node: failed to open file %s\n", path);
+//         return -1;
+//     }
+//     ext2_fwrite(&module->module_id, sizeof(module->module_id), 1, file);
+//     ext2_fclose(file);
+// }
 
 int delete_device_node(const char *dir, const char *name)
 {

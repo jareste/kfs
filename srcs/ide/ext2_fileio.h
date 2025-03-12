@@ -18,6 +18,9 @@
 #define DIR_MODE     0x4000   // Directory (S_IFDIR)
 #define DEVICE_MODE  0x2000   // Character device (S_IFCHR)
 
+#define EBADF 9
+#define EFAULT 14
+#define EMFILE 24
 
 typedef struct ext2_FILE
 {
@@ -29,8 +32,17 @@ typedef struct ext2_FILE
 
 typedef enum { FD_FILE = 0, FD_SOCKET, FD_MODULE } fd_type_t;
 
+/* Not being used for now but may be interesting */
+// typedef struct file_operations
+// {
+//     ssize_t (*read)(struct file *file, void *buf, size_t count);
+//     ssize_t (*write)(struct file *file, const void *buf, size_t count);
+//     int (*close)(struct file *file);
+// } file_operations_t;
+
 typedef struct file
 {
+    // file_operations_t *fops;
     fd_type_t type;
     int flags;
     int ref_count;
@@ -53,5 +65,7 @@ int sys_close(int fd);
 ssize_t sys_read(int fd, void *buf, size_t count);
 ssize_t sys_write(int fd, const void *buf, size_t count);
 
+
+int create_device_node(const char *dir, const char *name, module_t *module);
 
 #endif

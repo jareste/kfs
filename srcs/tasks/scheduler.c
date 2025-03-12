@@ -360,6 +360,19 @@ void add_child(task_t* parent, task_t* child)
     }
 }
 
+/* this is of course not ok. */
+// void init_standard_fds(task_t *task)
+// {
+//     task->fd_table[0] = open_device("/dev/tty", O_RDONLY);
+
+//     task->fd_table[1] = open_device("/dev/console", O_WRONLY);
+
+//     task->fd_table[2] = task->fd_table[1];
+//     task->fd_pointers[2] = task->fd_pointers[1];
+//     if (task->fd_table[2])
+//         task->fd_pointers[2].ref_count++;
+// }
+
 void create_task(void (*entry)(void), char* name, void (*on_exit)(void))
 {
     task_t *task;

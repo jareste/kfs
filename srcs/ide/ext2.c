@@ -288,8 +288,7 @@ static int ext2_lookup(uint32_t dir_inode_num, const char *name, uint32_t *child
     return -1;
 }
 
-/* used to be static. review */
-int ext2_resolve_path(const char *path, uint32_t *inode_out)
+static int ext2_resolve_path(const char *path, uint32_t *inode_out)
 {
     uint32_t cur = (path[0]=='/') ? EXT2_ROOT_INODE : current_dir;
     char token[256];
@@ -379,9 +378,7 @@ int ext2_remove_all_files(const char *dir_path)
     return 0;
 }
 
-
-/* used to be static. review */
-int ext2_create_file(uint32_t parent_inode_num, const char *name, uint16_t mode)
+static int ext2_create_file(uint32_t parent_inode_num, const char *name, uint16_t mode)
 {
     uint32_t new_inode = ext2_allocate_inode();
     if (new_inode == 0)
@@ -677,6 +674,39 @@ size_t ext2_fwrite(const void *ptr, size_t size, size_t nmemb, ext2_FILE *stream
     return total / size; /* number of "elements" written */
 }
 
+int create_device_node(const char *dir, const char *name, module_t *module)
+{
+    char path[256];
+
+    strcpy(path, dir);
+    strcat(path, "/");
+    strcat(path, name);
+
+    uint32_t parent_inode;
+    if (ext2_resolve_path(dir, &parent_inode) < 0)
+    {
+        printf("ext2_fopen: parent directory not found '%s'\n", dir);
+        return NULL;
+    }
+    /* Maybe create better a wrapper for this
+     */
+    int inode_num = ext2_create_file(parent_inode, name, DEVICE_MODE);
+    if (inode_num == -1)
+    {
+        printf("create_device_node: failed to create file %s\n", path);
+        return -1;
+    }
+
+    ext2_FILE *file = ext2_fopen(path, "w");
+    if (!file)
+    {
+        printf("create_device_node: failed to open file %s\n", path);
+        return -1;
+    }
+    ext2_fwrite(&module->module_id, sizeof(module->module_id), 1, file);
+    ext2_fclose(file);
+}
+
 /* --- Fileio fds Implementations --- */
 int sys_open(const char *path, int flags)
 {
@@ -793,6 +823,29 @@ ssize_t sys_read(int fd, void *buf, size_t count)
     file_obj->offset = file_obj->file->pos;
     return n;
 }
+
+/* It's supposed to work but has not been tested. */
+int dup(int oldfd)
+{
+    task_t *current = get_current_task();
+    if (oldfd < 0 || oldfd >= MAX_FDS || !current->fd_table[oldfd])
+        return -EBADF;
+
+    int newfd;
+    for (newfd = 0; newfd < MAX_FDS; newfd++)
+    {
+        if (!current->fd_table[newfd])
+            break;
+    }
+    if (newfd == MAX_FDS)
+        return -EMFILE;
+
+    current->fd_table[newfd] = current->fd_table[oldfd];
+    current->fd_pointers[newfd] = current->fd_pointers[oldfd];
+    current->fd_pointers[newfd].ref_count++;
+    return newfd;
+}
+
 
 ssize_t sys_write(int fd, const void *buf, size_t count)
 {
