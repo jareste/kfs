@@ -97,8 +97,13 @@ int sys_socket(int domain, int type, int protocol)
     if (!sock)
         return -1;
     
+    /* TODO REVIEWWWW!!! */
+    current->fd_pointers[fd].fops.read = (void*)socket_recv;
+    current->fd_pointers[fd].fops.write = (void*)socket_send;
+    current->fd_pointers[fd].fops.close = (void*)socket_close;
+    /* TODO REVIEWWWW!!! */
     current->fd_pointers[fd].flags = 0;
-    current->fd_pointers[fd].socket = sock;
+    current->fd_pointers[fd].fp = sock;
     current->fd_pointers[fd].type = FD_SOCKET;
     current->fd_pointers[fd].ref_count = 1;
     current->fd_table[fd] = true;
@@ -119,7 +124,7 @@ int sys_bind(int sockfd, const char *address)
         return -1;
     }
     
-    registry_insert(address, file_obj->socket);
+    registry_insert(address, file_obj->fp);
     return 0;
 }
 
@@ -137,7 +142,7 @@ ssize_t sys_recv(int fd, void *buf, size_t count)
         printf("sys_recv: fd %d is not a socket\n", fd);
         return -1;
     }
-    return socket_recv(file_obj->socket, buf, count);
+    return socket_recv(file_obj->fp, buf, count);
 }
 
 ssize_t sys_send(int fd, const void *buf, size_t count)
@@ -154,7 +159,7 @@ ssize_t sys_send(int fd, const void *buf, size_t count)
         printf("sys_send: fd %d is not a socket\n", fd);
         return -1;
     }
-    return socket_send(file_obj->socket, buf, count);
+    return socket_send(file_obj->fp, buf, count);
 }
 
 
@@ -192,7 +197,7 @@ int sys_connect(const char *address)
 
     file_t *file_obj = kmalloc(sizeof(file_t));
     file_obj->type = FD_SOCKET;
-    file_obj->socket = client_sock;
+    file_obj->fp = client_sock;
     file_obj->flags = 0;
     file_obj->ref_count = 1;
 

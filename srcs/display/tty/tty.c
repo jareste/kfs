@@ -43,7 +43,7 @@ int tty_save_to_file(const char *path)
         {
             break;
         }
-        ext2_fwrite(&tty.buffer[i], 1, 1, file);
+        ext2_fwrite(file, &tty.buffer[i], 1);
     }
 
     ext2_fclose(file);

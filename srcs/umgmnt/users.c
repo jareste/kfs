@@ -29,7 +29,7 @@ bool find_user_by_name(const char *name, user_t* u)
         return false;
     }
 
-    while (ext2_fread(u, 1, sizeof(user_t), fp))
+    while (ext2_fread(fp, u, sizeof(user_t)))
     {
         if (u->is_valid && strcmp(u->name, name) == 0)
         {
@@ -63,7 +63,7 @@ void add_user(user_t *new_user)
     {
         return;
     }
-    ext2_fwrite(new_user, 1, sizeof(user_t), fp);
+    ext2_fwrite(fp, new_user, sizeof(user_t));
     ext2_fclose(fp);
 }
 
@@ -78,7 +78,7 @@ void list_users()
         return;
     }
 
-    while (ext2_fread(&u, sizeof(user_t), 1, fp))
+    while (ext2_fread(fp, &u, sizeof(user_t)))
     {
         printf("User: '%s' %s\n", u.name, u.is_valid ? "active" : "deleted");
     }

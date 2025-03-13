@@ -589,7 +589,7 @@ int ext2_fclose(ext2_FILE *stream)
     return 0;
 }
 
-size_t ext2_fread(void *ptr, size_t size, size_t nmemb, ext2_FILE *stream)
+size_t ext2_fread(ext2_FILE *stream, void *ptr, size_t size)
 {
     if (!stream) return 0;
     if (stream->mode != 0)
@@ -598,8 +598,7 @@ size_t ext2_fread(void *ptr, size_t size, size_t nmemb, ext2_FILE *stream)
         return 0;
     }
 
-    size_t total = size * nmemb;
-    if (total == 0) return 0;
+    if (size == 0) return 0;
 
     if (stream->pos >= stream->inode.i_size)
     {
@@ -607,9 +606,9 @@ size_t ext2_fread(void *ptr, size_t size, size_t nmemb, ext2_FILE *stream)
     }
 
     size_t remain = stream->inode.i_size - stream->pos;
-    if (remain < total)
+    if (remain < size)
     {
-        total = remain;
+        size = remain;
     }
 
     if (stream->inode.i_block[0] == 0)
@@ -620,14 +619,14 @@ size_t ext2_fread(void *ptr, size_t size, size_t nmemb, ext2_FILE *stream)
     uint8_t blockbuf[EXT2_BLOCK_SIZE];
     ext2_read_block(stream->inode.i_block[0], blockbuf);
 
-    memcpy(ptr, blockbuf + stream->pos, total);
+    memcpy(ptr, blockbuf + stream->pos, size);
 
-    stream->pos += total;
+    stream->pos += size;
 
-    return total / size;
+    return size;
 }
 
-size_t ext2_fwrite(const void *ptr, size_t size, size_t nmemb, ext2_FILE *stream)
+size_t ext2_fwrite(ext2_FILE *stream, const void *ptr, size_t size)
 {
     if (!stream) return 0;
     if (stream->mode != 1)
@@ -636,8 +635,7 @@ size_t ext2_fwrite(const void *ptr, size_t size, size_t nmemb, ext2_FILE *stream
         return 0;
     }
 
-    size_t total = size * nmemb;
-    if (total == 0) return 0;
+    if (size == 0) return 0;
 
     if (stream->inode.i_block[0] == 0)
     {
@@ -655,23 +653,23 @@ size_t ext2_fwrite(const void *ptr, size_t size, size_t nmemb, ext2_FILE *stream
     ext2_read_block(stream->inode.i_block[0], blockbuf);
 
     size_t space = EXT2_BLOCK_SIZE - stream->pos;
-    if (space < total)
+    if (space < size)
     {
-        total = space;
+        size = space;
     }
 
-    memcpy(blockbuf + stream->pos, ptr, total);
+    memcpy(blockbuf + stream->pos, ptr, size);
 
     ext2_write_block(stream->inode.i_block[0], blockbuf);
 
-    stream->pos += total;
+    stream->pos += size;
     if (stream->pos > stream->inode.i_size)
     {
         stream->inode.i_size = stream->pos;
     }
     ext2_write_inode(stream->inode_num, &stream->inode);
 
-    return total / size; /* number of "elements" written */
+    return size; /* number of "elements" written */
 }
 
 int create_device_node(const char *dir, const char *name, module_t *module)
@@ -703,7 +701,7 @@ int create_device_node(const char *dir, const char *name, module_t *module)
         printf("create_device_node: failed to open file %s\n", path);
         return -1;
     }
-    ext2_fwrite(&module->module_id, sizeof(module->module_id), 1, file);
+    ext2_fwrite(file, &module->module_id, sizeof(module->module_id));
     ext2_fclose(file);
 }
 
@@ -749,11 +747,23 @@ int sys_open(const char *path, int flags)
 
     /* Fill the file_t structure in the task's fd_pointers array */
     if (fp->inode.i_mode & DEVICE_MODE)
+    {
+        /*fill module fileops*/
         current->fd_pointers[fd].type = FD_MODULE;
+    }
     else
+    {
+        /* TODO REVIEWWWW!!! */
+        current->fd_pointers[fd].fops.read = ext2_fread;
+        current->fd_pointers[fd].fops.write = ext2_fwrite;
+        current->fd_pointers[fd].fops.close = ext2_fclose;
+        /* TODO REVIEWWWW!!! */
         current->fd_pointers[fd].type = FD_FILE;
+    }
+
+
     current->fd_pointers[fd].flags = flags;
-    current->fd_pointers[fd].file = fp;
+    current->fd_pointers[fd].fp = fp;
     current->fd_pointers[fd].offset = fp->pos;
     current->fd_pointers[fd].ref_count = 1;
     current->fd_table[fd] = true;
@@ -772,12 +782,14 @@ int sys_close(int fd)
 
     /* Get pointer to the file object in the array */
     file_obj = &current->fd_pointers[fd];
-    if (file_obj->type == FD_SOCKET)
-    {
-        socket_close(file_obj->socket);
-    }
-    else
-        ext2_fclose(file_obj->file);
+    file_obj->fops.close(file_obj->fp);
+    /* TODO modify */
+    // if (file_obj->type == FD_SOCKET)
+    // {
+    //     socket_close(file_obj->fp);
+    // }
+    // else
+    //     ext2_fclose(file_obj->fp);
     
     /* Mark slot as free and zero out the structure */
     current->fd_table[fd] = false;
@@ -796,31 +808,36 @@ ssize_t sys_read(int fd, void *buf, size_t count)
         return -1;
 
     file_obj = &current->fd_pointers[fd];
-    if (file_obj->type == FD_SOCKET)
-    {
-        return socket_recv(file_obj->socket, buf, count);
-    }
-    else if (file_obj->type == FD_MODULE)
-    {
-        int mod_num;
-        n = ext2_fread(&mod_num, 4, 1, file_obj->file);
-        /* TODO
-         * With modnum, simply call the read function of the module
-         */
-        module_t *mod = file_obj->module;
+    return file_obj->fops.read(file_obj->fp, buf, count);
+    
+    /* TODO fix file and module read. */
 
-        if (mod && mod->read)
-        {
-            size_t offset = file_obj->offset;
-            mod->read(mod, buf, count, &offset);
-            file_obj->offset = offset;
-            return count;
-        }
-        return -1;
-    }
 
-    n = ext2_fread(buf, 1, count, file_obj->file);
-    file_obj->offset = file_obj->file->pos;
+    // if (file_obj->type == FD_SOCKET)
+    // {
+    //     return socket_recv(file_obj->socket, buf, count);
+    // }
+    // else if (file_obj->type == FD_MODULE)
+    // {
+    //     int mod_num;
+    //     n = ext2_fread(&mod_num, 4, 1, file_obj->file);
+    //     /* TODO
+    //      * With modnum, simply call the read function of the module
+    //      */
+    //     module_t *mod = file_obj->module;
+
+    //     if (mod && mod->read)
+    //     {
+    //         size_t offset = file_obj->offset;
+    //         mod->read(mod, buf, count, &offset);
+    //         file_obj->offset = offset;
+    //         return count;
+    //     }
+    //     return -1;
+    // }
+
+    // n = ext2_fread(buf, 1, count, file_obj->file);
+    // file_obj->offset = file_obj->file->pos;
     return n;
 }
 
@@ -864,13 +881,15 @@ ssize_t sys_write(int fd, const void *buf, size_t count)
         return -1;
 
     file_obj = &current->fd_pointers[fd];
-    if (file_obj->type == FD_SOCKET)
-    {
-        return socket_send(file_obj->socket, buf, count);
-    }
+    return file_obj->fops.write(file_obj->fp, buf, count);
+    // if (file_obj->type == FD_SOCKET)
+    // {
+    //     return socket_send(file_obj->fp, buf, count);
+    // }
 
-    n = ext2_fwrite(buf, 1, count, file_obj->file);
-    file_obj->offset = file_obj->file->pos;
+    /* TODO move this to fwrite. */
+    // n = ext2_fwrite(file_obj->fp, buf, count);
+    // file_obj->offset = file_obj->fp->pos;
     return n;
 }
 
@@ -1486,7 +1505,7 @@ void test_fileio()
         return;
     }
     const char *msg = "Hello from ext12_fwrite!\n";
-    ext2_fwrite(msg, 1, strlen(msg), f);
+    ext2_fwrite(f, msg, strlen(msg));
     ext2_fclose(f);
 
     f = ext2_fopen("hello.txt", "r");
@@ -1497,7 +1516,7 @@ void test_fileio()
     }
     char buf[128];
     memset(buf, 0, sizeof(buf));
-    size_t n = ext2_fread(buf, 1, sizeof(buf) - 1, f);
+    size_t n = ext2_fread(f, buf, sizeof(buf) - 1);
     printf("Read %u bytes: %s\n", (unsigned)n, buf);
     ext2_fclose(f);
 }

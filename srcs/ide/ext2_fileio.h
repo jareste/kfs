@@ -32,32 +32,35 @@ typedef struct ext2_FILE
 
 typedef enum { FD_FILE = 0, FD_SOCKET, FD_MODULE } fd_type_t;
 
-/* Not being used for now but may be interesting */
-// typedef struct file_operations
-// {
-//     ssize_t (*read)(struct file *file, void *buf, size_t count);
-//     ssize_t (*write)(struct file *file, const void *buf, size_t count);
-//     int (*close)(struct file *file);
-// } file_operations_t;
+/* With fileops i can directly dispatch the read/write/close operations
+ * allowing me to use the same struct for files, modules, stdin/stdout, etc.
+ */
+typedef struct file_operations
+{
+    ssize_t (*read)(void* fp, void *buf, size_t count);
+    ssize_t (*write)(void* fp, const void *buf, size_t count);
+    int     (*close)(void* fp);
+} file_operations_t;
 
 typedef struct file
 {
-    // file_operations_t *fops;
+    file_operations_t fops;
     fd_type_t type;
     int flags;
     int ref_count;
     uint32_t offset;
-    union
-    {
-        ext2_FILE*  file;
-        socket_t*   socket;
-        module_t*   module;
-    };
+    void* fp;
+    // union
+    // {
+    //     ext2_FILE*  file;
+    //     socket_t*   socket;
+    //     module_t*   module;
+    // };
 } file_t;
 
 ext2_FILE *ext2_fopen(const char *path, const char *mode);
-size_t ext2_fread(void *ptr, size_t size, size_t nmemb, ext2_FILE *stream);
-size_t ext2_fwrite(const void *ptr, size_t size, size_t nmemb, ext2_FILE *stream);
+size_t ext2_fread(ext2_FILE *stream, void *ptr, size_t size);
+size_t ext2_fwrite(ext2_FILE *stream, const void *ptr, size_t size);
 int ext2_fclose(ext2_FILE *stream);
 
 int sys_open(const char *path, int flags);
