@@ -110,6 +110,16 @@ void dispatch_read_request(int i, char *buffer, size_t size, size_t* offset)
         registered_modules[i]->read(registered_modules[i], buffer, size, offset);
 }
 
+module_t *get_module_by_id(int module_id)
+{
+    for (int i = 0; i < module_count; i++)
+    {
+        if (registered_modules[i]->module_id == module_id)
+            return registered_modules[i];
+    }
+    return NULL;
+}
+
 /* -------------------------------
    Module memory ring implementation
    -------------------------------

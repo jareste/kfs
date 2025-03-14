@@ -201,6 +201,10 @@ int sys_connect(const char *address)
     file_obj->flags = 0;
     file_obj->ref_count = 1;
 
+    file_obj->fops.read = (void*)socket_recv;
+    file_obj->fops.write = (void*)socket_send;
+    file_obj->fops.close = (void*)socket_close;
+
     current->fd_pointers[fd] = *file_obj;
     current->fd_table[fd] = true;
     kfree(file_obj);

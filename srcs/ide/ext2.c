@@ -669,6 +669,7 @@ size_t ext2_fwrite(ext2_FILE *stream, const void *ptr, size_t size)
     }
     ext2_write_inode(stream->inode_num, &stream->inode);
 
+    // file_obj->offset = file_obj->fp->pos;
     return size; /* number of "elements" written */
 }
 
@@ -684,10 +685,9 @@ int create_device_node(const char *dir, const char *name, module_t *module)
     if (ext2_resolve_path(dir, &parent_inode) < 0)
     {
         printf("ext2_fopen: parent directory not found '%s'\n", dir);
-        return NULL;
+        return -1;
     }
-    /* Maybe create better a wrapper for this
-     */
+
     int inode_num = ext2_create_file(parent_inode, name, DEVICE_MODE);
     if (inode_num == -1)
     {
@@ -703,6 +703,7 @@ int create_device_node(const char *dir, const char *name, module_t *module)
     }
     ext2_fwrite(file, &module->module_id, sizeof(module->module_id));
     ext2_fclose(file);
+    return 0;
 }
 
 /* --- Fileio fds Implementations --- */
@@ -710,6 +711,7 @@ int sys_open(const char *path, int flags)
 {
     task_t *current = get_current_task();
     int fd;
+    int n;
     char mode_str[4];
     ext2_FILE *fp;
 
@@ -749,7 +751,22 @@ int sys_open(const char *path, int flags)
     if (fp->inode.i_mode & DEVICE_MODE)
     {
         /*fill module fileops*/
+        int mod_num;
+        n = ext2_fread(fp, &mod_num, 4);
+
+        module_t *mod = get_module_by_id(mod_num);
+        if (!mod)
+        {
+            printf("sys_open: module not found: %d\n", mod_num);
+            return -1;
+        }
+        current->fd_pointers[fd].fops.read = mod->read;
+        current->fd_pointers[fd].fops.write = NULL;
+        current->fd_pointers[fd].fops.close = NULL;
+        current->fd_pointers[fd].fp = mod;
         current->fd_pointers[fd].type = FD_MODULE;
+        current->fd_pointers[fd].offset = 0;
+        ext2_fclose(fp); /* Not needing file anymore. */
     }
     else
     {
@@ -759,12 +776,31 @@ int sys_open(const char *path, int flags)
         current->fd_pointers[fd].fops.close = ext2_fclose;
         /* TODO REVIEWWWW!!! */
         current->fd_pointers[fd].type = FD_FILE;
+        current->fd_pointers[fd].fp = fp;
+        current->fd_pointers[fd].offset = fp->pos;
     }
+
+    // else if (file_obj->type == FD_MODULE)
+    // {
+    //     int mod_num;
+    //     n = ext2_fread(&mod_num, 4, 1, file_obj->file);
+    //     /* TODO
+    //      * With modnum, simply call the read function of the module
+    //      */
+    //     module_t *mod = file_obj->module;
+
+    //     if (mod && mod->read)
+    //     {
+    //         size_t offset = file_obj->offset;
+    //         mod->read(mod, buf, count, &offset);
+    //         file_obj->offset = offset;
+    //         return count;
+    //     }
+    //     return -1;
+    // }
 
 
     current->fd_pointers[fd].flags = flags;
-    current->fd_pointers[fd].fp = fp;
-    current->fd_pointers[fd].offset = fp->pos;
     current->fd_pointers[fd].ref_count = 1;
     current->fd_table[fd] = true;
 
@@ -782,7 +818,13 @@ int sys_close(int fd)
 
     /* Get pointer to the file object in the array */
     file_obj = &current->fd_pointers[fd];
-    file_obj->fops.close(file_obj->fp);
+    if (file_obj->ref_count > 1)
+    {
+        file_obj->ref_count--;
+        return 0;
+    }
+    if (file_obj->fops.close)
+        file_obj->fops.close(file_obj->fp);
     /* TODO modify */
     // if (file_obj->type == FD_SOCKET)
     // {
@@ -808,8 +850,26 @@ ssize_t sys_read(int fd, void *buf, size_t count)
         return -1;
 
     file_obj = &current->fd_pointers[fd];
-    return file_obj->fops.read(file_obj->fp, buf, count);
-    
+
+    if (file_obj->type == FD_MODULE)
+    {
+        module_t *mod = file_obj->fp;
+        if (mod && mod->read)
+        {
+            size_t offset = file_obj->offset;
+            mod->read(mod, buf, count, &file_obj->offset);
+            if (file_obj->offset > 0)
+                return file_obj->offset - offset;
+            else
+                return file_obj->offset;
+        }
+        return -1;
+    }
+
+    if (file_obj->fops.read)
+        return file_obj->fops.read(file_obj->fp, buf, count);
+    else
+        return -1;
     /* TODO fix file and module read. */
 
 
@@ -881,7 +941,14 @@ ssize_t sys_write(int fd, const void *buf, size_t count)
         return -1;
 
     file_obj = &current->fd_pointers[fd];
-    return file_obj->fops.write(file_obj->fp, buf, count);
+    if (file_obj->fops.write)
+        n = file_obj->fops.write(file_obj->fp, buf, count);
+
+    if (file_obj->type == FD_FILE)
+    {
+        file_obj->offset = ((ext2_FILE*)file_obj->fp)->pos;
+    }
+    
     // if (file_obj->type == FD_SOCKET)
     // {
     //     return socket_send(file_obj->fp, buf, count);

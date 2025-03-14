@@ -16,7 +16,7 @@ static void keyboard_cleanup(module_t *self)
 
 const char* keyboard_buffer = "Hello, World!\n que tal?\n jajaja\n";
 
-static void keyboard_read(module_t *self, char *buffer, size_t size, size_t* offset)
+static keyboard_read(module_t *self, char *buffer, size_t size, size_t* offset)
 {
     size_t len = strlen(keyboard_buffer);
     if (*offset >= len)

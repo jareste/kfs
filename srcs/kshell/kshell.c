@@ -493,15 +493,19 @@ static void ks_read_mod_kb()
     size_t n;
     int fd;
     puts_color("Reading from keyboard module...\n", LIGHT_MAGENTA);
+    char* filename = "/dev/keyboard_module";
+    char* print_string = "Read from keyboard module: '%s'\n";
+    fd = open(filename, O_RDONLY);
     while (1)
     {
-        fd = sys_open("/dev/keyboard_module", O_RDONLY);
-        n = sys_read(fd, buffer, sizeof(buffer) - 1);
+        memset(buffer, 0, sizeof(buffer));
+        n = read(fd, buffer, sizeof(buffer) - 1);
         buffer[n] = 0;
-        printf("Read from keyboard module: '%s'\n", buffer);
-        if (strcmp(buffer, "exit") == 0)
+        printf(print_string, buffer);
+        if (n == 0)
             break;
     }
+    close(fd);
 }
 
 void kshell()

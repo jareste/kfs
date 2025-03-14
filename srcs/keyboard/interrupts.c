@@ -45,6 +45,8 @@ void page_fault_handler(registers* regs, error_state* stack)
     if (stack->err_code & 0x4) printf("User-mode\n");
     else printf("Kernel-mode\n");
 
+    printf("Kernel uptime: %d\n", get_kuptime());
+
 
     printf("Killing task %d due to page fault.\n", task->pid);
     _exit(-1);  // or call kill_task() as appropriate

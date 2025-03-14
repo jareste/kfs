@@ -28,7 +28,7 @@ typedef struct module
     int  (*init)(struct module *self, struct kernel_services *services);
     void (*cleanup)(struct module *self);
     void (*read)(struct module *self, char *buffer, size_t size, size_t* offset);
-    
+
     /* Event callbacks */
     void (*on_key_event)(struct module *self, int key, int state);
     void (*on_cpu_cycle)(struct module *self);
@@ -46,6 +46,8 @@ int unregister_module(module_t *module);
 void dispatch_key_event(int key, int state);
 void dispatch_cpu_cycle(void);
 void dispatch_time_request(struct time_info *timeData);
+
+module_t *get_module_by_id(int module_id);
 
 /* Example of special memory allocation functions for modules 
    using a memory ring dedicated to modules. */
