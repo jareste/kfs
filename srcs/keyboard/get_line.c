@@ -5,10 +5,15 @@
 char* get_line()
 {
     char c;
+
     clear_kb_buffer();
     while ((c = getc()) != '\n')
     {
-        if (get_current_task()->screen_echo == true && c != '\0')
+        if (c == '\0')
+        {
+            continue;
+        }
+        if (get_current_task()->screen_echo == true && c != '\0' && c != '\b')
         {
             putc(c);
         }

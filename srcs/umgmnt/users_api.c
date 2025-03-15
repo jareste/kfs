@@ -44,7 +44,7 @@ static int login(char *username, char *password)
     start_user();
 
     set_current_dir(g_current_user.home_inode);
-
+    clear_kb_buffer();
     return 0;
 }
 

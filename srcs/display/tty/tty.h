@@ -15,4 +15,5 @@ typedef struct
     bool ready;
 } tty_device_t;
 
+void tty_delete_ch(tty_device_t *tty);
 #endif

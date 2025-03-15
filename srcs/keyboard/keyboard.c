@@ -62,6 +62,12 @@ static void delete_last_kb_char()
         keyb_buff_end--;
     }
     keyboard_buffer[keyb_buff_end] = 0;
+
+    if (keyb_buff_start > keyb_buff_end)
+    {
+        keyb_buff_start = keyb_buff_end;
+    }
+
     delete_last_char();
 }
 
@@ -164,6 +170,7 @@ void keyboard_handler()
             else
             {
                 delete_last_kb_char();
+                broadcast_to_tty('\b');
             }
             break;
         default:
