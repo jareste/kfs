@@ -65,6 +65,13 @@
     "numeric": "cpp",
     "ostream": "cpp",
     "sstream": "cpp",
-    "modules.h": "c"
+    "modules.h": "c",
+    "limits": "c",
+    "ranges": "c",
+    "streambuf": "c",
+    "tuple": "c",
+    "type_traits": "c",
+    "utility": "c",
+    "algorithm": "c"
   }
 }

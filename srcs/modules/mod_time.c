@@ -25,8 +25,9 @@ static void time_cleanup(module_t *self)
 /* Callback for time requests */
 static void time_on_request(module_t *self, struct time_info *timeData)
 {
+    char* str = "[Time Module] Current time is %d.\n";
     timeData->current_time = time(NULL);
-    // printf("[Time Module] Current time is %d.\n", (long)timeData->current_time);
+    // printf(str, (long)timeData->current_time);
 }
 
 /* Define the module instance */
