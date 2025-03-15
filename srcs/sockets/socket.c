@@ -82,7 +82,7 @@ int sys_socket(int domain, int type, int protocol)
     socket_t *sock;
 
     current = get_current_task();
-    for (fd = 3; fd < MAX_FDS; fd++)
+    for (fd = 0; fd < MAX_FDS; fd++)
     {
         if (current->fd_table[fd] == false)
             break;
@@ -174,7 +174,7 @@ int sys_connect(const char *address)
 
     task_t *current = get_current_task();
     int fd;
-    for (fd = 3; fd < MAX_FDS; fd++)
+    for (fd = 0; fd < MAX_FDS; fd++)
     {
         if (current->fd_table[fd] == false)
             break;

@@ -53,6 +53,8 @@ typedef struct task_struct
     bool is_user;
     uint64_t wake_tick;
 
+    bool screen_echo;
+
     file_t fd_pointers[MAX_FDS];
     bool fd_table[MAX_FDS];
 

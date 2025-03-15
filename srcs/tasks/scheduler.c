@@ -9,6 +9,7 @@
 #include "../user/syscalls/stdlib.h"
 #include "../utils/queue.h"
 #include "../sockets/socket.h"
+#include "../display/tty/tty.h"
 
 #define STACK_SIZE 4096
 #define MAX_ACTIVE_TASKS 15
@@ -361,17 +362,19 @@ void add_child(task_t* parent, task_t* child)
 }
 
 /* this is of course not ok. */
-// void init_standard_fds(task_t *task)
-// {
-//     task->fd_table[0] = open_device("/dev/tty", O_RDONLY);
+void init_standard_fds(task_t *task)
+{
+    tty_device_t* tty_device = kmalloc(sizeof(tty_device_t));
+    task->fd_table[0] = true;
+    open_tty_device(tty_device, &task->fd_pointers[0]);
+    
+    task->fd_table[1] = true;
+    open_tty_device(tty_device, &task->fd_pointers[1]);
 
-//     task->fd_table[1] = open_device("/dev/console", O_WRONLY);
-
-//     task->fd_table[2] = task->fd_table[1];
-//     task->fd_pointers[2] = task->fd_pointers[1];
-//     if (task->fd_table[2])
-//         task->fd_pointers[2].ref_count++;
-// }
+    task->fd_table[2] = true;
+    memcpy(&task->fd_pointers[2], &task->fd_pointers[1], sizeof(file_t));
+    task->fd_pointers[2].ref_count++;
+}
 
 void create_task(void (*entry)(void), char* name, void (*on_exit)(void))
 {
@@ -417,6 +420,7 @@ void create_task(void (*entry)(void), char* name, void (*on_exit)(void))
     task->gid = 0;
     task->is_user = false;
     task->env = NULL; /* Kernel tasks don't need envp. */
+    task->screen_echo = false;
     memset(task->fd_table, 0, sizeof(task->fd_table));
     init_signals(task);
     add_new_task(task);
@@ -495,6 +499,8 @@ void create_user_task(void (*entry)(char**), char* name, void (*on_exit)(void))
     task->gid = 1000;
     task->is_user = true;
     memset(task->fd_table, 0, sizeof(task->fd_table));
+    task->screen_echo = true;
+    init_standard_fds(task);
     init_signals(task);
     add_new_task(task);
 }

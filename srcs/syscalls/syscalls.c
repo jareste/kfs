@@ -67,14 +67,14 @@ int _sys_read(int fd, char* buf, size_t count)
         return -1;
 
     // return sys_read2(fd, buf, count);
-    if (fd == 0)
-    {
-        char* buffer = get_line();
-        size_t len = strlen(buffer);
-        buffer[len] = '\0'; /* remove '\n' */
-        strcpy(buf, buffer);
-        return len;
-    }
+    // if (fd == 0)
+    // {
+    //     char* buffer = get_line();
+    //     size_t len = strlen(buffer);
+    //     buffer[len] = '\0'; /* remove '\n' */
+    //     strcpy(buf, buffer);
+    //     return len;
+    // }
 
     return sys_read(fd, buf, count);
 }

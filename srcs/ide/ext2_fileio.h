@@ -30,7 +30,7 @@ typedef struct ext2_FILE
     int mode;                   /* 0=read, 1=write (for simplicity) */
 } ext2_FILE;
 
-typedef enum { FD_FILE = 0, FD_SOCKET, FD_MODULE } fd_type_t;
+typedef enum { FD_FILE = 0, FD_SOCKET, FD_MODULE, FD_TTY } fd_type_t;
 
 /* With fileops i can directly dispatch the read/write/close operations
  * allowing me to use the same struct for files, modules, stdin/stdout, etc.

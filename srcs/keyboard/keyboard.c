@@ -4,6 +4,7 @@
 #include "../time/time.h"
 #include "idt.h"
 #include "../memory/memory.h"
+#include "../tasks/task.h"
 #include "keyboard.h"
 
 #define KEYBOARD_DATA_PORT 0x60
@@ -34,7 +35,7 @@ char get_last_char()
 char get_last_char_blocking()
 {
     char c;
-    while ((c = get_last_char()) == '\0');
+    while ((c = get_last_char()) == '\0') scheduler();
     return c;
 }
 
@@ -80,6 +81,36 @@ int write_stdin_wrapper(int fd, const char *buf, size_t count)
         set_kb_char(buf[i]);
     }
     return count;
+}
+
+int read_stdin_wrapper(int fd, char *buf, size_t count)
+{
+    int i;
+
+    for (i = 0; i < count; i++)
+    {
+        buf[i] = get_last_char_blocking();
+    }
+    return count;
+}
+
+void broadcast_to_tty(char key)
+{
+    task_t* task = get_current_task();
+
+    while (task)
+    {
+        if (task->is_user == true)
+        {
+            if (task->fd_table[0] == true && task->fd_pointers[0].type == FD_TTY)
+            {
+                task->fd_pointers[0].fops.write(task->fd_pointers[0].fp, &key, 1);
+            }
+        }
+        task = task->next;
+        if (task == get_current_task())
+            break;
+    }
 }
 
 void keyboard_handler()
@@ -139,8 +170,14 @@ void keyboard_handler()
             key = get_ascii_char(scancode, shift_pressed);
             if (key)
             {
-                tty_write_ch(key);
-                putc(key);
+                // tty_write_ch(key);
+                // get_current_task()->fd_pointers[1].fops.write(1, &key, 1);
+                /* echo must not be here as we don't know which task is into CPU when
+                 * interrupt is triggered
+                 */
+                // if (get_current_task()->screen_echo == true)
+                //     putc(key);
+                broadcast_to_tty(key);
                 set_kb_char(key);
             }
     }

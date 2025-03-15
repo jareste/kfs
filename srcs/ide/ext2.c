@@ -716,7 +716,7 @@ int sys_open(const char *path, int flags)
     ext2_FILE *fp;
 
     /* Find a free file descriptor slot */
-    for (fd = 3; fd < MAX_FDS; fd++)
+    for (fd = 0; fd < MAX_FDS; fd++)
     {
         if (current->fd_table[fd] == false)
             break;
@@ -930,11 +930,11 @@ ssize_t sys_write(int fd, const void *buf, size_t count)
     file_t *file_obj;
     size_t n;
 
-    if (fd == 1)
-    {
-        puts(buf);
-        return count;
-    }
+    // if (fd == 1)
+    // {
+    //     puts(buf);
+    //     return count;
+    // }
 
     current = get_current_task();
     if (fd < 0 || fd >= MAX_FDS || current->fd_table[fd] == false)
