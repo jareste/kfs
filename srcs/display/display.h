@@ -58,4 +58,7 @@ void stop_ofuscation();
 void enable_print();
 void disable_print();
 
+int write_stdout_wrapper(int fd, const char *buf, size_t count);
+int write_stderr_wrapper(int fd, const char *buf, size_t count);
+
 #endif

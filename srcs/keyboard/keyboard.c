@@ -71,6 +71,17 @@ void clear_kb_buffer()
     memset(keyboard_buffer, 0, KEYBOARD_BUFFER_SIZE);
 }
 
+int write_stdin_wrapper(int fd, const char *buf, size_t count)
+{
+    int i;
+
+    for (i = 0; i < count; i++)
+    {
+        set_kb_char(buf[i]);
+    }
+    return count;
+}
+
 void keyboard_handler()
 {
     uint8_t scancode = inb(KEYBOARD_DATA_PORT);

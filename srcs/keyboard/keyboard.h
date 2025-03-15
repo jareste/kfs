@@ -22,4 +22,6 @@ char* get_line();
 char get_ascii_char(uint8_t scancode, bool shifted);
 void set_keyboard_layout(uint8_t layout);
 
+int write_stdin_wrapper(int fd, const char *buf, size_t count);
+
 #endif
