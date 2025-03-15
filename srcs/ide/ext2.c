@@ -706,6 +706,26 @@ int create_device_node(const char *dir, const char *name, module_t *module)
     return 0;
 }
 
+int delete_device_node(const char *dir, const char *name)
+{
+    char path[256];
+    strcpy(path, dir);
+    strcat(path, "/");
+    strcat(path, name);
+
+    uint32_t inode_num;
+    if (ext2_resolve_path(path, &inode_num) < 0)
+    {
+        printf("delete_device_node: file not found '%s'\n", path);
+        return -1;
+    }
+
+    // ext2_remove_dir_entry(EXT2_ROOT_INODE, name);
+    ext2_cmd_rm(path);
+    // ext2_free_inode(inode_num);
+    return 0;
+}
+
 /* --- Fileio fds Implementations --- */
 int sys_open(const char *path, int flags)
 {

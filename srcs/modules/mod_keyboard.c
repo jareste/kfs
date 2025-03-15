@@ -54,3 +54,8 @@ void register_keyboard_module()
 {
     register_module(&keyboard_module);
 }
+
+void unregister_keyboard_module()
+{
+    unregister_module(&keyboard_module);
+}

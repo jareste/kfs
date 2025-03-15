@@ -45,6 +45,7 @@ static void ks_signal();
 static void ks_get_pid();
 
 static void ks_read_mod_kb();
+static void ks_unreg_mod_kb();
 
 static command_section_t command_sections[MAX_SECTIONS];
 
@@ -57,6 +58,7 @@ static command_t global_commands[] = {
     {"shutdown", "Shutdown the system", shutdown},
     {"sec", "Change the command section", cmd_section},
     {"readmodkb", "Read from the keyboard module", ks_read_mod_kb},
+    {"unregmodkb", "Unregister the keyboard module", ks_unreg_mod_kb},
     {NULL, NULL, NULL}    
 };
 
@@ -496,7 +498,13 @@ static void ks_read_mod_kb()
     puts_color("Reading from keyboard module...\n", LIGHT_MAGENTA);
     char* filename = "/dev/keyboard_module";
     char* print_string = "Read from keyboard module: '%s'\n";
+    char* failed = "Failed to open /dev/keyboard_module\n";
     fd = open(filename, O_RDONLY);
+    if (fd < 0)
+    {
+        puts_color(failed, RED);
+        return;
+    }
     while (1)
     {
         memset(buffer, 0, sizeof(buffer));
@@ -507,6 +515,11 @@ static void ks_read_mod_kb()
             break;
     }
     close(fd);
+}
+
+static void ks_unreg_mod_kb()
+{
+    unregister_keyboard_module();
 }
 
 void kshell()
