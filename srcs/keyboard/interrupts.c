@@ -3,7 +3,6 @@
 #include "../io/io.h"
 #include "../timers/timers.h"
 #include "idt.h"
-#include "../memory/memory.h"
 #include "keyboard.h"
 #include "signals.h"
 #include "../syscalls/syscalls.h"
@@ -39,7 +38,7 @@ void page_fault_handler(registers* regs, error_state* stack)
     else printf("Kernel-mode\n");
 
 
-    debug_page_mapping(faulting_address);
+    // debug_page_mapping(faulting_address);
     while(1);
 
     NEVER_HERE;

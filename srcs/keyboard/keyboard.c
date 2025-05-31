@@ -3,7 +3,6 @@
 #include "../io/io.h"
 #include "../timers/timers.h"
 #include "idt.h"
-#include "../memory/memory.h"
 #include "keyboard.h"
 
 #define KEYBOARD_DATA_PORT 0x60

@@ -1,20 +1,37 @@
+; entry.asm — ELF32/i386 multiboot kernel entry
+; nasm -f elf32 entry.asm -o entry.o
+
 BITS 32
+extern kernel_main
+global start
 
 section .multiboot
-align 4
-    dd 0x1BADB002   ; Multiboot magic number
-    dd 0x00000003   ; Flags: align modules on page boundaries and provide memory map
-    dd -(0x1BADB002 + 0x00000003) ; Checksum
+  align 4
+  dd 0x1BADB002            ; Multiboot header magic
+  dd 0x00000003            ; flags: align modules & mmap
+  dd -(0x1BADB002 + 0x00000003)
 
 section .text
-global start
 start:
-    cli                     ; Disable interrupts
-    mov esp, 0x90000        ; Set up stack
-    mov eax, 0x100000       ; Kernel load address
-    jmp eax                 ; Jump to kernel entry point
+  cli                      ; disable interrupts
+  ; GRUB has already enabled protected mode and loaded us at 1MiB
+  ; EAX = MULTIBOOT_BOOTLOADER_MAGIC
+  ; EBX = pointer to multiboot_info_t
 
-section .note.GNU-stack noalloc noexec nowrite progbits
+  mov  ebp, esp            ; keep old stack frame if you like
+  mov  esp, KSTACK_TOP     ; set up your kernel stack
 
-TIMES 510 - ($ - $$) db 0  ; Pad to 510 bytes
-dw 0xAA55                  ; Boot sector signature
+  ; push args in reverse order (cdecl):
+  push ebx                 ; arg2 = mbi_addr
+  push eax                 ; arg1 = magic
+  call kernel_main         ; kernel_main(magic, mbi_addr)
+
+.hang:
+  hlt
+  jmp .hang
+
+section .bss
+  align 16
+KSTACK_BOTTOM:
+  resb 0x2000              ; 8 KiB stack
+KSTACK_TOP:
