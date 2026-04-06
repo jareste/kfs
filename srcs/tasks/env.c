@@ -21,10 +21,10 @@ unsigned long hash_string(const char *str)
 
 env_hashtable_t* env_hashtable_create(size_t size)
 {
-    env_hashtable_t *table = vmalloc(sizeof(env_hashtable_t), true);
+    env_hashtable_t *table = vmalloc(sizeof(env_hashtable_t));
     if (!table) return NULL;
     table->size = size;
-    table->buckets = vmalloc(size * sizeof(env_entry_t*), true);
+    table->buckets = vmalloc(size * sizeof(env_entry_t*));
     memset(table->buckets, 0, size * sizeof(env_entry_t*));
     if (!table->buckets)
     {
@@ -73,7 +73,7 @@ int env_hashtable_set(env_hashtable_t *table, const char *key, const char *value
         entry = entry->next;
     }
     
-    env_entry_t *new_entry = vmalloc(sizeof(env_entry_t), true);
+    env_entry_t *new_entry = vmalloc(sizeof(env_entry_t));
     if (!new_entry) return -1;
     new_entry->key = vstrdup(key);
     new_entry->value = vstrdup(value);
@@ -147,7 +147,7 @@ char** get_full_env(env_hashtable_t *table)
         }
     }
     
-    char **envp = vmalloc((count + 1) * sizeof(char*), true);
+    char **envp = vmalloc((count + 1) * sizeof(char*));
     if (!envp)
         return NULL;
     
@@ -160,7 +160,7 @@ char** get_full_env(env_hashtable_t *table)
             size_t key_len   = strlen(entry->key);
             size_t value_len = strlen(entry->value);
             size_t total_len = key_len + 1 + value_len + 1;
-            char *env_str = vmalloc(total_len, true);
+            char *env_str = vmalloc(total_len);
             if (!env_str)
             {
                 for (size_t j = 0; j < idx; j++)

@@ -30,6 +30,7 @@ typedef struct task_struct
     uint32_t cpu_esp_;    // you might keep cpu state in a struct
     uint32_t pid;
     uintptr_t kernel_stack; // Kernel Stack (for syscalls)
+    uintptr_t kernel_stack_base; // Base of the kernel stack (for freeing)
     uintptr_t stack;        // User Stack
     struct task_struct *parent;
     struct task_struct *next;
@@ -52,6 +53,7 @@ typedef struct task_struct
     gid_t gid;
     bool is_user;
     uint64_t wake_tick;
+    uintptr_t stub_page;
 
     bool screen_echo;
 

@@ -4,6 +4,7 @@
 #include "../memory/memory.h"
 #include "../display/display.h"
 #include "../tasks/task.h"
+#include "../panic/kpanic.h"
 
 #define MAX_LBA 0x0FFFFFFF
 
@@ -81,7 +82,7 @@ void ide_read_sector(uint32_t lba, uint16_t* buffer)
 
     if (inb(IDE_STATUS) & IDE_STATUS_ERR)
     {
-        kernel_panic("IDE read error");
+        kpanic("IDE read error", 1);
     }
 
     for (int i = 0; i < 256; i++)
@@ -131,7 +132,7 @@ void ide_write_sector(uint32_t lba, uint16_t* buffer)
 
     if (inb(IDE_STATUS) & IDE_STATUS_ERR)
     {
-        kernel_panic("IDE write error");
+        kpanic("IDE write error", 1);
     }
     
     enable_interrupts();

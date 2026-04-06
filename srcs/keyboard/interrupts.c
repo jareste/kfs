@@ -9,6 +9,34 @@
 #include "../syscalls/syscalls.h"
 #include "../tasks/task.h"
 #include "../ide/ide.h"
+#include "../panic/kpanic.h"
+
+#define PF_PRESENT  (1 << 0)
+#define PF_WRITE    (1 << 1)
+#define PF_USER     (1 << 2)
+#define PF_RESERVED (1 << 3)
+#define PF_IFETCH   (1 << 4)
+
+
+void print_enabled_interrupts_asm()
+{
+    uint32_t eflags;
+    __asm__ __volatile__("pushf; pop %0" : "=r"(eflags));
+    if (eflags & (1 << 9))
+        printf("Interrupts are enabled from asm\n");
+    else
+        printf("Interrupts are disabled from asm\n");
+}
+
+void print_enabled_interrupts()
+{
+    uint32_t eflags;
+    __asm__ __volatile__("pushf; pop %0" : "=r"(eflags));
+    if (eflags & (1 << 9))
+        printf("Interrupts are enabled\n");
+    else
+        printf("Interrupts are disabled\n");
+}
 
 void enable_interrupts(void)
 {
@@ -29,8 +57,21 @@ void page_fault_handler(registers* regs, error_state* stack)
     task_t *task = get_current_task();
     if (task)
     {
-        printf("Task(%d) '%s': ", task->pid, task->name);
+        printf("Task(%d) '%s': \n", task->pid, task->name);
     }
+
+    printf("EIP=%x CS=%x fault_addr=%x err=%x\n",
+           stack->eip, stack->cs, faulting_address, stack->err_code);
+
+    if ((stack->cs & 0x3) == 3)
+    {
+        error_state_user_t *ustack = (error_state_user_t*)stack;
+        printf("EFLAGS=%x ESP_user=%x SS_user=%x\n",
+               ustack->eflags, ustack->esp_user, ustack->ss_user);
+    }
+
+    printf("EIP at fault: %x\n", stack->eip);
+    printf("CS  at fault: %x\n", stack->cs);
     printf("Page fault at 0x");
     put_hex(faulting_address);
     putc('\n');
@@ -39,13 +80,29 @@ void page_fault_handler(registers* regs, error_state* stack)
     putc('\n');
 
     printf("Error type: ");
-    if (!(stack->err_code & 0x1)) printf("Non-present page ");
-    if (stack->err_code & 0x2) printf("Write ");
-    else printf("Read ");
-    if (stack->err_code & 0x4) printf("User-mode\n");
-    else printf("Kernel-mode\n");
+    if (!(stack->err_code & PF_PRESENT))
+        printf("non-present page | ");
+    else
+        printf("protection violation | ");
 
-    printf("Kernel uptime: %d\n", get_kuptime());
+    if (stack->err_code & PF_WRITE)
+        printf("write access | ");
+    else
+        printf("read access | ");
+
+    if (stack->err_code & PF_USER)
+        printf("user mode");
+    else
+        printf("kernel mode");
+
+    if (stack->err_code & PF_RESERVED)
+        printf(" | reserved bit set");
+
+    if (stack->err_code & PF_IFETCH)
+        printf(" | instruction fetch");
+
+
+    printf("\nKernel uptime: %d\n", get_kuptime());
 
 
     printf("Killing task %d due to page fault.\n", task->pid);
@@ -92,6 +149,10 @@ void irq_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_state
     //     // printf("Switching tasks\n");
     // }
 
+    if(intr_no >= 8)
+        outb(0xA0, 0x20);
+	outb(PIC_EOI, PIC1_COMMAND);
+
     switch (intr_no)
     {
         case 0:
@@ -109,14 +170,8 @@ void irq_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_state
         printf("eax: %d\n", reg.eax);
         printf("ebx: %d\n", reg.ebx);
             printf("Interrupt HW number: %d\n", intr_no);
-            kernel_panic("Unknown interrupt");
+            kpanic("Unknown interrupt", 1);
     }
-
-    // enable_interrupts();
-    // if (intr_no >= 8)
-    // puts("#######################################################");
-    if(intr_no >= 8) outb(0xA0, 0x20);
-	outb(PIC_EOI, PIC1_COMMAND);
 }
 
 void init_interrupts()
@@ -190,7 +245,7 @@ void init_interrupts()
     idt_set_gate(46, (uint32_t)irq_handler_14); /* Primary ATA Hard Disk */
     idt_set_gate(47, (uint32_t)irq_handler_15); /* Secondary ATA Hard Disk */
 
-    idt_set_gate(0x30, (uint32_t)syscall_handler_asm);
+    idt_set_gate_user(0x30, (uint32_t)syscall_handler_asm);
 
     register_idt();
     ide_init();

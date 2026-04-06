@@ -1,5 +1,6 @@
 #include "task.h"
 #include "../memory/memory.h"
+#include "../memory/vmm.h"
 #include "../utils/utils.h"
 #include "../utils/stdint.h"
 #include "../display/display.h"
@@ -14,6 +15,15 @@
 #define STACK_SIZE 4096
 #define MAX_ACTIVE_TASKS 15
 #define USER_STACK_SIZE 4096
+
+typedef struct __attribute__((packed))
+{
+    uint32_t edi, esi, ebp, esp_dummy;
+    uint32_t ebx, edx, ecx, eax;
+    uint32_t eip;
+    uint32_t cs;
+    uint32_t eflags;
+} irq_frame_t;
 
 void kernel_main();
 void task_1(void);
@@ -42,21 +52,55 @@ static char* default_envp[] = {
     NULL
 };
 
-task_t* current_task = NULL;
-task_t* task_list = NULL;
-task_t* to_free = NULL;
-pid_t task_index = 0;
-Queue finished_pid_queue;
-
-void dtach_from_childs(task_t* task)
+static uint8_t user_code[] =
 {
-    child_list_t *current = task->children;
+    // write(1, msg, 10)
+    0xB8, 0x04, 0x00, 0x00, 0x00,   // mov eax, 4
+    0xBB, 0x01, 0x00, 0x00, 0x00,   // mov ebx, 1
+    0xB9, 0x00, 0x00, 0x00, 0x00,   // mov ecx, <addr>
+    0xBA, 0x0A, 0x00, 0x00, 0x00,   // mov edx, 10
+    0xCD, 0x30,                      // int 0x30  (write)
+
+    // exit(0)
+    0xB8, 0x01, 0x00, 0x00, 0x00,   // mov eax, 1
+    0xBB, 0x00, 0x00, 0x00, 0x00,   // mov ebx, 0
+    0xCD, 0x30,                      // int 0x30  (exit)
+};
+
+
+static uint8_t user_msg[] = "User task\n";
+
+/* Stub for exiting user tasks */
+static uint8_t exit_stub[] =
+{
+    0xB8, 0x01, 0x00, 0x00, 0x00,  // mov eax, 1  (SYS_EXIT)
+    0x31, 0xDB,                      // xor ebx, ebx
+    0xCD, 0x30,                      // int 0x30
+    0xEB, 0xFE,                      // jmp $ (por si acaso)
+};
+
+static uint32_t *saved_kernel_esp = NULL;
+static uint32_t m_let_scheduler_run = 0;
+static task_t* current_task = NULL;
+static task_t* task_list = NULL;
+static task_t* to_free = NULL;
+static pid_t task_index = 0;
+static Queue finished_pid_queue;
+
+void dtach_from_childs(task_t *task)
+{
+    child_list_t* current;
+    child_list_t* next;
+
+    current = task->children;
     while (current)
     {
         current->task->parent = NULL;
-        current = current->next;
+        next = current->next;
+        kfree(current);
+        current = next;
     }
-    kfree(task->children);
+    task->children = NULL;
 }
 
 void remove_from_father(task_t* task)
@@ -105,8 +149,13 @@ void free_finished_tasks()
     remove_from_father(to_free);
     close_all_fds(to_free);
     free_envp(to_free);
-    kfree((void*)to_free->kernel_stack);
-    kfree((void*)to_free->stack);
+    kfree((void*)to_free->kernel_stack_base);
+    if (to_free->is_user)
+        vfree((void*)to_free->stack);
+    else
+        kfree((void*)to_free->stack);
+    if (to_free->stub_page)
+        vfree((void*)to_free->stub_page);
     kfree(to_free);
     to_free = NULL;
 }
@@ -199,24 +248,82 @@ void check_wake_up(task_t* task)
     }
 }
 
-task_t* get_next_task()
+// task_t* get_next_task()
+// {
+//     task_t *current = current_task->next;
+//     check_wake_up(current);
+//     while (current->state == TASK_WAITING || current->state == TASK_SLEEPING)
+//     {
+//         current = current->next;
+//         check_wake_up(current);
+//         if (current->pid == 0)
+//         {
+//             current = current->next;
+//         }
+//     }
+//     return current;
+// }
+
+static task_t* get_next_task(void)
 {
-    task_t *current = current_task->next;
-    check_wake_up(current);
-    while (current->state == TASK_WAITING || current->state == TASK_SLEEPING)
+    task_t *start   = current_task->next;
+    task_t *current = start;
+
+    do
     {
-        current = current->next;
         check_wake_up(current);
-        if (current->pid == 0)
-        {
-            current = current->next;
-        }
+        if (current->pid != 0 &&
+            current->state != TASK_WAITING &&
+            current->state != TASK_SLEEPING &&
+            current->state != TASK_ZOMBIE &&
+            current->state != TASK_TO_DIE)
+            return current;
+        current = current->next;
+    } while (current != start);
+
+    return task_list;
+}
+
+void set_run_scheduler(int value)
+{
+    m_let_scheduler_run = value;
+}
+
+uint32_t timer_schedule(uint32_t *iframe_esp)
+{
+    static int inside_timer_schedule = 0;
+    if (!current_task || !task_list || !m_let_scheduler_run || inside_timer_schedule)
+        return 0;
+
+    inside_timer_schedule = 1;
+    irq_handler_timer();
+    free_finished_tasks();
+
+    task_t *next = get_next_task();
+    if (next == current_task)
+    {
+        inside_timer_schedule = 0;
+        return 0;
     }
-    return current;
+
+    task_t *prev = current_task;
+
+    prev->cpu.esp_ = (uint32_t)iframe_esp;
+
+    current_task = next;
+    if (next->state == TASK_READY || next->state == TASK_RUNNING)
+        next->state = TASK_RUNNING;
+
+    tss_set_stack(next->kernel_stack);
+    set_active_env(next->env);
+
+    inside_timer_schedule = 0;
+    return next->cpu.esp_;
 }
 
 void scheduler(void)
 {
+    return ;
     if (!current_task)
     {
         if (!task_list)
@@ -224,6 +331,8 @@ void scheduler(void)
         current_task = task_list;
     }
     
+    printf("Scheduler: ");
+    print_enabled_interrupts();
     free_finished_tasks();
 
     task_t *next = get_next_task();
@@ -295,25 +404,35 @@ void add_new_task(task_t* new_task)
     }
 }
 
-static void task_exit_task(task_t* task, int signal)
+static void task_exit_task(task_t *task, int signal)
 {
     if (task->on_exit)
         task->on_exit();
 
-    task_t *prev = current_task;
+    /* Unlink from the circular list */
+    task_t *prev = task_list;
     while (prev->next != task)
         prev = prev->next;
 
-    prev->next = task->next;
+    if (prev == task)
+    {
+        /* Only one task left — list becomes empty */
+        task_list = NULL;
+    }
+    else
+    {
+        prev->next = task->next;
+        if (task_list == task)
+            task_list = task->next;
+    }
 
     pid_t pid = task->pid;
-
     task->state = TASK_ZOMBIE;
-    // printf("Task %d exited with status %d ---\n", pid, signal);
     enqueue(&finished_pid_queue, pid, signal);
     to_free = task;
 
-    scheduler();
+    if (current_task == task)
+        scheduler();
 }
 
 static void task_exit_pid(pid_t task_id)
@@ -398,19 +517,24 @@ void create_task(void (*entry)(void), char* name, void (*on_exit)(void))
     stack = (uint32_t*)((uint32_t)stack & 0xFFFFFFF0);
     stack += STACK_SIZE / sizeof(uint32_t);
 
-    kernel_stack = (uint32_t*)((uint32_t)kernel_stack & 0xFFFFFFF0);
-    kernel_stack += STACK_SIZE / sizeof(uint32_t);
+    *--stack = 0x202;
+    *--stack = 0x08;
+    *--stack = (uint32_t)entry;
 
-    // Simulate interrupt frame (EIP, EFLAGS, etc.)
-    *--stack = 0x202;   // EFLAGS (IF enabled)
-    *--stack = 0x08;    // CS (kernel code segment)
-    *--stack = (uint32_t)task_exit; // EIP
-    *--stack = (uint32_t)entry; // EIP
+    *--stack = 0;
+    *--stack = 0;
+    *--stack = 0;
+    *--stack = 0;
+    *--stack = 0;
+    *--stack = 0;
+    *--stack = 0;
+    *--stack = 0;
 
     task->pid = task_index++;
     task->cpu.esp_ = (uint32_t)stack; // Point to the simulated interrupt frame
     task->state = TASK_READY;
-    task->kernel_stack = (uint32_t)kernel_stack;
+    task->kernel_stack = (uintptr_t)(stack + STACK_SIZE / sizeof(uint32_t));
+    task->stack = 0;
     memcpy(task->name, name, strlen(name) > 15 ? 15 : strlen(name));
     task->name[strlen(name) > 15 ? 15 : strlen(name)] = '\0';
     task->on_exit = on_exit;
@@ -422,85 +546,6 @@ void create_task(void (*entry)(void), char* name, void (*on_exit)(void))
     task->env = NULL; /* Kernel tasks don't need envp. */
     task->screen_echo = false;
     memset(task->fd_table, 0, sizeof(task->fd_table));
-    init_signals(task);
-    add_new_task(task);
-}
-
-void create_user_task(void (*entry)(char**), char* name, void (*on_exit)(void))
-{
-    task_t *task;
-    uint32_t *base;
-    uint32_t *user_stack;
-    uint32_t *kernel_stack;
-    uint32_t *user_stack_top;
-    int env_size;
-    int i;
-    char* key;
-    char* equal;
-    char* value;
-
-    if (task_index >= MAX_ACTIVE_TASKS)
-    {
-        puts_color("Max number of tasks reached\n", RED);
-        return;
-    }
-    
-    task = kmalloc(sizeof(task_t));
-
-    base = (uint32_t*)vmalloc(USER_STACK_SIZE, true);
-    memset(base, 0, USER_STACK_SIZE);
-
-    user_stack_top = base + (USER_STACK_SIZE / sizeof(uint32_t)) - 1;
-
-    kernel_stack = kmalloc(STACK_SIZE);
-    kernel_stack = (uint32_t*)((uint32_t)kernel_stack & 0xFFFFFFF0);
-    kernel_stack += STACK_SIZE / sizeof(uint32_t);
-
-    task->env = env_hashtable_create(128);
-    for (i = 0; default_envp[i]; i++)
-    {
-        key = default_envp[i];
-        equal = strchr(key, '=');
-        value = equal;
-        *equal = '\0';
-        *value = '\0';
-        value++;
-        env_hashtable_set(task->env, key, value);
-        *equal = '=';
-    }
-
-    char** envp = get_full_env(task->env);
-
-    user_stack = user_stack_top;
-    *--user_stack = 0x2B;
-    *--user_stack = (uint32_t)user_stack_top;
-    *--user_stack = (uint32_t)task_exit; // EIP
-    *--user_stack = 0x202;
-    *--user_stack = 0x23;
-    *--user_stack = (uint32_t)envp;
-    *--user_stack;
-    *--user_stack = (uint32_t)entry;
-
-    printf("User stack top after building iret frame: %p\n", user_stack);
-
-    // make_page_user((uintptr_t)entry);
-
-    task->pid = task_index++;
-    task->cpu.esp_ = (uint32_t)user_stack;
-    task->kernel_stack = (uint32_t)kernel_stack;
-    task->stack = (uint32_t)base;
-    task->state = TASK_READY;
-    memcpy(task->name, name, strlen(name) > 15 ? 15 : strlen(name));
-    task->name[strlen(name) > 15 ? 15 : strlen(name)] = '\0';
-    task->on_exit = on_exit;
-    task->entry_env = entry;
-    task->uid = 1000;
-    task->euid = 1000;
-    task->gid = 1000;
-    task->is_user = true;
-    memset(task->fd_table, 0, sizeof(task->fd_table));
-    task->screen_echo = true;
-    init_standard_fds(task);
     init_signals(task);
     add_new_task(task);
 }
@@ -619,6 +664,22 @@ pid_t _do_fork(const cpu_state_t *parent_state)
     child->on_exit = parent->on_exit;
     child->entry = parent->entry;
     child->parent = parent;
+
+    child->uid        = parent->uid;
+    child->euid       = parent->euid;
+    child->gid        = parent->gid;
+    child->is_user    = parent->is_user;
+    child->screen_echo = parent->screen_echo;
+    /* Inherit env (shallow copy — each process should ideally have its own) */
+    child->env        = parent->env;
+    /* Inherit file descriptors */
+    memcpy(child->fd_table,    parent->fd_table,    sizeof(parent->fd_table));
+    memcpy(child->fd_pointers, parent->fd_pointers, sizeof(parent->fd_pointers));
+    /* Increment ref counts on open files */
+    for (int i = 0; i < MAX_FDS; i++)
+        if (child->fd_table[i])
+            child->fd_pointers[i].ref_count++;
+
     add_child(parent, child);
     init_signals(child);
 
@@ -680,8 +741,9 @@ void task_1(void)
     // puts("Task 1 Started\n");
 
     size_t mmap_size = 16 * 1024;
-    void* user_buffer = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE | PROT_USER,
-                             MAP_ANONYMOUS, -1, 0);
+    // void* user_buffer = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE | PROT_USER,
+    //                          MAP_ANONYMOUS, -1, 0);
+    void* user_buffer = kmalloc(mmap_size);
     if (user_buffer == (void*)-1)
     {
         puts_color("test_mmap: mmap failed!\n", RED);
@@ -698,7 +760,7 @@ void task_1(void)
         }
     }
 
-    munmap(user_buffer, mmap_size);
+    kfree(user_buffer);
     // puts_color("test_mmap: mmap/munmap test passed\n", GREEN);
 
     signal(2, task_1_sighandler);
@@ -712,27 +774,6 @@ void task_1(void)
             puts_color("Error writing\n", RED);
         }
         scheduler();
-    }
-}
-
-void task_2_exit()
-{
-    // puts_color("Task 2 exited\n", RED);
-}
-
-void task_2(void)
-{
-    // puts("Task 2 Started\n");
-    int i = 0;
-    i = 0;
-    while (i < 500)
-    {
-        i++;
-        // puts("Task 2\n");
-        // if (i % 1000 == 0)
-        // {
-            scheduler();
-        // }
     }
 }
 
@@ -790,6 +831,7 @@ void socket_2()
         //     puts_color(read_str, GREEN);
         //     puts_color(buffer, GREEN);
         // }
+        sleep(3);
         scheduler();
     }
 
@@ -881,6 +923,126 @@ void task_read()
 
 }
 
+void create_user_code_task(char *name)
+{
+    // vmalloc garantiza alineación a página
+    uint8_t *code_page = vmalloc(PAGE_SIZE);
+    uint8_t *data_page = vmalloc(PAGE_SIZE);
+
+    // Guardar físicas ANTES de unmap
+    uint32_t code_pa = vmm_get_physical(vmm_current_directory(), (uint32_t)code_page);
+    uint32_t data_pa = vmm_get_physical(vmm_current_directory(), (uint32_t)data_page);
+
+    // Ahora sí están alineadas, remap con PAGE_USER_RW
+    vmm_unmap_page(vmm_current_directory(), (uint32_t)code_page);
+    vmm_unmap_page(vmm_current_directory(), (uint32_t)data_page);
+    vmm_map_page(vmm_current_directory(), (uint32_t)code_page, code_pa, PAGE_USER_RW);
+    vmm_map_page(vmm_current_directory(), (uint32_t)data_page, data_pa, PAGE_USER_RW);
+
+    // Después del remap, verificar flags
+    uint32_t *dir_entries = (uint32_t *)vmm_current_directory();
+    uint32_t dir_idx = (uint32_t)code_page >> 22;
+    uint32_t tbl_phys = dir_entries[dir_idx] & 0xFFFFF000;
+    uint32_t *tbl = (uint32_t *)tbl_phys;
+    uint32_t tbl_idx = ((uint32_t)code_page >> 12) & 0x3FF;
+    uint32_t pde_flags = dir_entries[dir_idx] & 0xFFF;
+    printf("PDE flags for code_page: %x\n", pde_flags);
+    printf("PTE flags for code_page: %x\n", tbl[tbl_idx] & 0xFFF);
+    // printf("PTE flags for code_page: 0x%x\n", tbl[tbl_idx] & 0xFFF);
+    // Debe ser 0x7 (PRESENT | RW | USER)
+
+    // Copiar datos y código
+    memcpy(data_page, user_msg, sizeof(user_msg));
+    memcpy(code_page, user_code, sizeof(user_code));
+
+
+    printf("code bytes at %p: ", code_page);
+    for (int i = 0; i < 10; i++)
+    {
+        put_2_hex(code_page[i]);
+        putc(' ');
+    }
+    printf("\n");
+    // Parchear dirección del buffer en el mov ecx
+    *(uint32_t *)(code_page + 11) = (uint32_t)data_page;
+
+    printf("ecx patch at offset 11: %x\n", *(uint32_t*)(code_page + 11));
+
+    create_user_task_at((uint32_t)code_page, name, NULL);
+}
+
+void create_user_task_at(uint32_t entry_addr, char *name, void (*on_exit)(void))
+{
+    task_t *task = kmalloc(sizeof(task_t));
+    memset(task, 0, sizeof(task_t));
+
+    uint32_t *kernel_stack_base = kmalloc(STACK_SIZE);
+    uint32_t *kernel_stack_top  = kernel_stack_base + STACK_SIZE / sizeof(uint32_t);
+
+    uint32_t ks_pa = vmm_get_physical(vmm_current_directory(), 
+                        (uint32_t)kernel_stack_top & 0xFFFFF000);
+    printf("kernel_stack_top=%x pa=%x\n", (uint32_t)kernel_stack_top, ks_pa);
+
+    uint32_t test_addr = (uint32_t)kernel_stack_top - 4;
+    uint32_t test_pa = vmm_get_physical(vmm_current_directory(), test_addr & 0xFFFFF000);
+    printf("kernel stack page pa=%x\n", test_pa);
+
+    uint32_t *user_stack_base = vmalloc(USER_STACK_SIZE);
+    uint32_t user_pages = PAGE_ALIGN(USER_STACK_SIZE) / PAGE_SIZE;
+    for (uint32_t i = 0; i < user_pages; i++)
+    {
+        uint32_t va = (uint32_t)user_stack_base + i * PAGE_SIZE;
+        uint32_t pa = vmm_get_physical(vmm_current_directory(), va);
+        vmm_unmap_page(vmm_current_directory(), va);
+        vmm_map_page(vmm_current_directory(), va, pa, PAGE_USER_RW);
+    }
+
+    /* Create exit stub for enforcing all programs to exit cleanly */
+    uint8_t *stub_page = vmalloc(PAGE_SIZE);
+    uint32_t stub_pa = vmm_get_physical(vmm_current_directory(), (uint32_t)stub_page);
+    vmm_unmap_page(vmm_current_directory(), (uint32_t)stub_page);
+    vmm_map_page(vmm_current_directory(), (uint32_t)stub_page, stub_pa, PAGE_USER_RW);
+
+    uint32_t *dir = (uint32_t*)vmm_current_directory();
+    dir[(uint32_t)stub_page >> 22] |= PAGE_USER;
+    __asm__ __volatile__("invlpg (%0)" : : "r"((uint32_t)stub_page) : "memory");
+
+    memcpy(stub_page, exit_stub, sizeof(exit_stub));
+
+    task->stub_page = (uintptr_t)stub_page;
+
+    uint32_t *usp = user_stack_base + USER_STACK_SIZE / sizeof(uint32_t);
+    *--usp = (uint32_t)stub_page;
+
+    uint32_t *ksp = kernel_stack_top;
+    *--ksp = 0x2B; /* SS */
+    *--ksp = (uint32_t)usp; /* ESP */
+    *--ksp = 0x202; /* EFLAGS */
+    *--ksp = 0x23; /* CS ring 3*/
+    *--ksp = entry_addr; /* EIP */
+
+    for (uint32_t i = 0; i < 8; i++)
+        *--ksp = 0;
+
+    task->cpu.esp_     = (uint32_t)ksp;
+    task->kernel_stack = (uintptr_t)kernel_stack_top;
+    task->kernel_stack_base = (uintptr_t)kernel_stack_base;
+    task->stack        = (uintptr_t)user_stack_base;
+    task->pid          = task_index++;
+    task->state        = TASK_READY;
+    task->is_user      = true;
+    task->on_exit      = on_exit;
+    task->uid = 1000; task->euid = 1000; task->gid = 1000;
+    task->screen_echo  = true;
+    memcpy(task->name, name, strlen(name) > 15 ? 15 : strlen(name));
+    task->name[15] = '\0';
+    memset(task->fd_table, 0, sizeof(task->fd_table));
+    init_standard_fds(task);
+    init_signals(task);
+
+    add_new_task(task);
+}
+
 void task_wait()
 {
     // printf("Task 5 Started\n");
@@ -889,6 +1051,7 @@ void task_wait()
     while (1)
     {
         pid = _wait(&status);
+        (void)pid;
         set_putchar_color(GREEN);
         // printf("Task 5: Child %d exited with status %d\n", pid, status);
         set_putchar_color(LIGHT_GREY);
@@ -921,19 +1084,21 @@ void unsleep_kshell()
 
 void start_user()
 {
-    create_user_task(ushell, "ushell", unsleep_kshell);
+    create_task(ushell, "ushell", unsleep_kshell);
 }
 
 void kshell();
+
 void start_foo_tasks(void)
 {
     create_task(kshell, "kshell", NULL);
     create_task(task_wait, "task_wait", NULL);
-    // create_task(task_1, "task_1", task_1_exit);
+    create_task(task_1, "task_1", task_1_exit);
     create_task(task_read, "task_read", NULL);
-    create_task(task_2, "task_2", task_2_exit);
     create_task(socket_1, "socket_1", NULL);
     create_task(socket_2, "socket_2", NULL);
+    create_user_code_task("user_code_task");
+    exec_bin("/hello");
 
     to_free = NULL;
     // printf("current_task: %p\n", current_task);

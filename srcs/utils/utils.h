@@ -55,7 +55,7 @@ size_t strspn(const char *s, const char *accept);
 char *strcat(char *dest, const char *src);
 char *strchr(const char *s, int c);
 void *memmove(void *dest, const void *src, size_t n);
-void uitoa(uint32_t num, char *buf);
+void uitoa(unsigned int value, char *str, int base);
 
 #define ASSERT(x)   if (!(x)) { kernel_panic("Assertion failed: " #x); }
 #define NEVER_HERE  kernel_panic("NEVER_HERE")

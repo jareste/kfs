@@ -1,14 +1,12 @@
 void _start() {
     const char msg[] = "Hello World\n";
     asm volatile (
-        "mov $1, %%rax\n"
-        "mov $1, %%rdi\n"
-        "mov %0, %%rsi\n"
-        "mov $12, %%rdx\n"
-        "syscall\n"
-        "mov $60, %%rax\n"
-        "xor %%rdi, %%rdi\n"
-        "syscall\n"
-        :: "r"(msg) : "rax", "rdi", "rsi", "rdx"
+        "movl $4, %%eax\n"     /* sys_write (i386) */
+        "movl $1, %%ebx\n"     /* stdout */
+        "movl %0, %%ecx\n"     /* buf */
+        "movl $12, %%edx\n"    /* len */
+        "int $0x30\n"
+        :: "r"(msg)
+        : "eax","ebx","ecx","edx"
     );
 }

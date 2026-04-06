@@ -22,27 +22,7 @@ typedef int off_t;
 #define MAP_ANONYMOUS           0x20
 #define MAP_FIXED               0x40
 
-void paging_init();
-
-void* kbrk(void* addr);
-void kfree(void* ptr);
-void* kmalloc(size_t size);
-size_t ksize(void* ptr);
-void heap_init();
-
-void dump_page_directory();
-void debug_page_mapping(uint32_t address);
-
-void* vmalloc(size_t size, int is_user);
-void vfree(void* ptr);
-size_t vsize(void* ptr);
-
-void* mmap(void* addr, size_t length, int prot, int flags, int fd, off_t offset);
-int munmap(void* addr, size_t length);
-
-void* vstrdup(const char *s);
-void* kstrdup(const char *s);
-
-void make_page_user(uintptr_t addr);
+#include "kmalloc.h"
+#include "vmalloc.h"
 
 #endif // MEMORY_H

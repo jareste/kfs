@@ -7,6 +7,7 @@
 #include "../keyboard/keyboard.h"
 #include "../display/display.h"
 #include "../tasks/task.h"
+#include "../panic/kpanic.h"
 #include "ext2_fileio.h"
 
 extern int ide_read_sectors(uint32_t lba, uint8_t count, void *buffer);
@@ -65,14 +66,14 @@ static void ext2_read_block(uint32_t block, void *buf)
 {
     uint32_t lba = EXT2_PARTITION_START + block * SECTORS_PER_BLOCK;
     if (ide_read_sectors(lba, SECTORS_PER_BLOCK, buf) < 0)
-        kernel_panic("ext2: read block error");
+        kpanic("ext2: read block error", 1);
 }
 
 static void ext2_write_block(uint32_t block, void *buf)
 {
     uint32_t lba = EXT2_PARTITION_START + block * SECTORS_PER_BLOCK;
     if (ide_write_sectors(lba, SECTORS_PER_BLOCK, buf) < 0)
-        kernel_panic("ext2: write block error");
+        kpanic("ext2: write block error", 1);
 }
 
 static void ext2_read_inode(uint32_t inode_num, struct ext2_inode *inode)
@@ -425,7 +426,7 @@ uint32_t ext2_get_inode(const char *path)
 char *ext2_pwd(void)
 {
     if (current_dir == EXT2_ROOT_INODE)
-        return vstrdup("/");
+        return kstrdup("/");
 
     char *components[32];
     int count = 0;
@@ -479,9 +480,9 @@ char *ext2_pwd(void)
         if (!found)
         {
             /* Fall back: convert inode number to string */
-            uitoa(curr, name);
+            uitoa(curr, name, 10);
         }
-        components[count++] = vstrdup(name);
+        components[count++] = kstrdup(name);
         curr = parent;
         if (curr == EXT2_ROOT_INODE)
             break;
@@ -591,39 +592,66 @@ int ext2_fclose(ext2_FILE *stream)
 
 size_t ext2_fread(ext2_FILE *stream, void *ptr, size_t size)
 {
-    if (!stream) return 0;
-    if (stream->mode != 0)
-    {
-        printf("ext2_fread: file not opened for reading\n");
-        return 0;
-    }
-
-    if (size == 0) return 0;
-
-    if (stream->pos >= stream->inode.i_size)
-    {
-        return 0;
-    }
-
-    size_t remain = stream->inode.i_size - stream->pos;
-    if (remain < size)
-    {
-        size = remain;
-    }
-
-    if (stream->inode.i_block[0] == 0)
-    {
-        return 0;
-    }
-
     uint8_t blockbuf[EXT2_BLOCK_SIZE];
-    ext2_read_block(stream->inode.i_block[0], blockbuf);
+    size_t bytes_read;
+    uint8_t *out;
+    size_t remain;
+    size_t to_copy;
+    uint32_t block_num;
+    uint32_t file_offset;
+    uint32_t block_index;
+    uint32_t block_offset;
+    uint32_t indirect_index;
 
-    memcpy(ptr, blockbuf + stream->pos, size);
+    if (!stream || stream->mode != 0)
+        return 0;
+    if (size == 0)
+        return 0;
+    if (stream->pos >= stream->inode.i_size)
+        return 0;
 
-    stream->pos += size;
+    remain = stream->inode.i_size - stream->pos;
+    if (remain < size)
+        size = remain;
 
-    return size;
+    out = (uint8_t*)ptr;
+    bytes_read = 0;
+    while (bytes_read < size)
+    {
+        file_offset = stream->pos + bytes_read;
+        block_index = file_offset / EXT2_BLOCK_SIZE;
+        block_offset = file_offset % EXT2_BLOCK_SIZE;
+
+        block_num = 0;
+        if (block_index < 12)
+        {
+            block_num = stream->inode.i_block[block_index];
+        }
+        else
+        {
+            indirect_index = block_index - 12;
+            if (indirect_index < EXT2_BLOCK_SIZE / 4)
+            {
+                uint32_t indirect_buf[EXT2_BLOCK_SIZE / 4];
+                ext2_read_block(stream->inode.i_block[12], (uint8_t*)indirect_buf);
+                block_num = indirect_buf[indirect_index];
+            }
+        }
+
+        if (block_num == 0) break;
+
+        ext2_read_block(block_num, blockbuf);
+
+        to_copy = EXT2_BLOCK_SIZE - block_offset;
+        if (to_copy > size - bytes_read)
+            to_copy = size - bytes_read;
+
+        memcpy(out + bytes_read, blockbuf + block_offset, to_copy);
+        bytes_read += to_copy;
+    }
+
+    stream->pos += bytes_read;
+    return bytes_read;
 }
 
 size_t ext2_fwrite(ext2_FILE *stream, const void *ptr, size_t size)
@@ -919,6 +947,35 @@ ssize_t sys_read(int fd, void *buf, size_t count)
     // n = ext2_fread(buf, 1, count, file_obj->file);
     // file_obj->offset = file_obj->file->pos;
     return n;
+}
+
+ssize_t sys_lseek(int fd, ssize_t offset, int whence)
+{
+    task_t *current = get_current_task();
+    if (fd < 0 || fd >= MAX_FDS || !current->fd_table[fd])
+        return -EBADF;
+
+    file_t *file_obj = &current->fd_pointers[fd];
+    if (file_obj->type != FD_FILE)
+        return -1;
+
+    ext2_FILE *fp = file_obj->fp;
+    size_t new_pos;
+    if (whence == SEEK_SET)
+        new_pos = offset;
+    else if (whence == SEEK_CUR)
+        new_pos = fp->pos + offset;
+    else if (whence == SEEK_END)
+        new_pos = fp->inode.i_size + offset;
+    else
+        return -1;
+
+    if (new_pos < 0 || new_pos > fp->inode.i_size)
+        return -1;
+
+    fp->pos = new_pos;
+    file_obj->offset = new_pos;
+    return new_pos;
 }
 
 /* It's supposed to work but has not been tested. */
@@ -1615,7 +1672,7 @@ void ext2_mount(void)
     ext2_read_block(1, buf);
     memcpy(&ext2.sb, buf, sizeof(struct ext2_super_block));
     if (ext2.sb.s_magic != 0xEF53)
-        kernel_panic("ext2: bad magic number");
+        kpanic("ext2: bad magic number", 1);
     /* Read group descriptor (assumed to be in block 2) */
     ext2_read_block(2, buf);
     memcpy(&ext2.gd, buf, sizeof(struct ext2_group_desc));

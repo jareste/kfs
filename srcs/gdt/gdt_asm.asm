@@ -7,7 +7,7 @@ gdt_flush:
     mov fs, ax
     mov gs, ax
     
-    mov ax, 0x18        ; Kernel stack segment selector
+    mov ax, 0x10        ; Kernel stack segment selector
     mov ss, ax
 
     jmp 0x08:reload_cs  ; Jump to the next instruction, far jump

@@ -2,6 +2,7 @@
 #include "../utils/utils.h"
 #include "../display/display.h"
 #include "../tasks/task.h"
+#include "../panic/kpanic.h"
 #include "idt.h"
 
 static void signal_handler(int signal);
@@ -99,7 +100,7 @@ static void signal_handler(int signal)
 
 static void panic_signal_handler(int signal)
 {
-    kernel_panic("Panic signal received");
+    kpanic("Panic signal received", 1);
 }
 
 void init_signals(task_t* task)
