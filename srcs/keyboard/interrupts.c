@@ -156,8 +156,6 @@ void irq_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_state
     switch (intr_no)
     {
         case 0:
-            // scheduler();
-            // disable_interrupts();
             irq_handler_timer();
             break;
         case 1:

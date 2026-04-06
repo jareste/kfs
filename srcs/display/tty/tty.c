@@ -117,7 +117,6 @@ int tty_read(void *fp, char *buf, size_t count)
         c = _tty_read(tty);
         if (c == '\0')
         {
-            scheduler();
             continue;
         }
         if (c == '\b')

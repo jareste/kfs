@@ -25,11 +25,10 @@ GRUB_DIR = $(ISO_DIR)/boot/grub
 vpath %.c $(SRC_DIR) $(SRC_DIR)/utils $(SRC_DIR)/display $(SRC_DIR)/keyboard $(SRC_DIR)/gdt \
 			$(SRC_DIR)/idt $(SRC_DIR)/kshell $(SRC_DIR)/io $(SRC_DIR)/time $(SRC_DIR)/memory \
 			$(SRC_DIR)/syscalls $(SRC_DIR)/tasks $(SRC_DIR)/sockets $(SRC_DIR)/ide \
-			$(SRC_DIR)/umgmnt $(SRC_DIR)/user/ushell $(SRC_DIR)/display/tty $(SRC_DIR)/modules \
+			$(SRC_DIR)/umgmnt $(SRC_DIR)/display/tty $(SRC_DIR)/modules \
 			$(SRC_DIR)/panic
 
 vpath %.asm $(BOOT_DIR) $(SRC_DIR)/keyboard $(SRC_DIR)/gdt $(SRC_DIR)/utils $(SRC_DIR)/tasks \
-			$(SRC_DIR)/user/syscalls
 
 C_SOURCES = kernel.c strcmp.c strlen.c printf.c putc.c puts.c keyboard.c \
 			idt.c itoa.c gdt.c put_hex.c kdump.c kshell.c memset.c strtol.c \
@@ -38,14 +37,12 @@ C_SOURCES = kernel.c strcmp.c strlen.c printf.c putc.c puts.c keyboard.c \
 			interrupts.c signals.c syscalls.c get_line.c layouts.c \
 			scheduler.c socket.c queue.c ide.c ext2.c users.c sha256.c \
 			strcpy.c users_api.c strncpy.c strncat.c strrchr.c \
-			strtok.c strcspn.c strspn.c strcat.c ushell.c env.c \
+			strtok.c strcspn.c strspn.c strcat.c env.c \
 			strchr.c memmove.c uitoa.c vstrdup.c kstrdup.c sock_registers.c \
 			tty.c modules.c mod_keyboard.c mod_time.c elf_loader.c
 
 ASM_SOURCES = boot.asm handler.asm gdt_asm.asm dump_registers.asm \
-			  clear_registers.asm tasks.asm write.asm kill.asm \
-			  read.asm signal.asm get_pid.asm sys_yeld.asm exit.asm \
-			  close.asm open.asm sleep.asm fork.asm time.asm usleep.asm
+			  clear_registers.asm tasks.asm
 
 SRC = $(C_SOURCES) $(ASM_SOURCES)
 

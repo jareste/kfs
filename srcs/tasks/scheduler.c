@@ -7,7 +7,6 @@
 #include "../keyboard/signals.h"
 #include "../gdt/gdt.h"
 #include "../kshell/kshell.h"
-#include "../user/syscalls/stdlib.h"
 #include "../utils/queue.h"
 #include "../sockets/socket.h"
 #include "../display/tty/tty.h"
@@ -206,7 +205,6 @@ void schedule_task_sleep(task_t* task, uint64_t seconds)
 {
     task->state = TASK_SLEEPING;
     task->wake_tick = seconds;
-    scheduler();
 }
 
 pid_t _wait(int* status)
@@ -215,12 +213,9 @@ pid_t _wait(int* status)
     pid_t pid = dequeue(&finished_pid_queue, &data);
     if (pid == 0)
     {
-        scheduler();
         while (pid == 0)
         {
             pid = dequeue(&finished_pid_queue, &data);
-            if (pid == 0)
-                scheduler();
         }
     }
     if (status)
@@ -321,69 +316,6 @@ uint32_t timer_schedule(uint32_t *iframe_esp)
     return next->cpu.esp_;
 }
 
-void scheduler(void)
-{
-    return ;
-    if (!current_task)
-    {
-        if (!task_list)
-            return;
-        current_task = task_list;
-    }
-    
-    printf("Scheduler: ");
-    print_enabled_interrupts();
-    free_finished_tasks();
-
-    task_t *next = get_next_task();
-
-    if (next->pid == 0)
-    {
-        next = next->next;
-    }
-
-    while (next->state == TASK_WAITING)
-    {
-        next = next->next;
-        if (next->pid == 0)
-        {
-            next = next->next;
-        }
-    }
-
-    task_t *prev = current_task;
-    tss_set_stack(next->kernel_stack);
-
-    current_task = next;
-    if (next->state == TASK_READY)
-    {
-        next->state = TASK_RUNNING;
-    }
-    else if (next->state == TASK_RUNNING)
-    {
-        uint32_t *stack = (uint32_t*)next->cpu.esp_;
-        *--stack = (uint32_t)handle_signals;
-        next->cpu.esp_ = (uint32_t)stack;
-    }
-    // if (next->pid == 5)
-    //     while(1);
-    
-    // puts_color("Scheduler\n", current_task->pid); // easy way of seeing scheduler working.
-    // puts_color("Scheduler\n", LIGHT_MAGENTA);
-    set_active_env(next->env);
-    if (next->is_user)
-    {
-        // puts_color("Switching to user\n", LIGHT_MAGENTA);
-        switch_context_to_user(prev, next);
-    }
-    else
-        switch_context(prev, next);
-    // puts_color("Scheduler\n", RED);
-    /* think this should not be here maybe (?)*/
-    enable_interrupts();
-    outb(0x20, 0x20);
-}
-
 void add_new_task(task_t* new_task)
 {
     if (!task_list)
@@ -431,8 +363,7 @@ static void task_exit_task(task_t *task, int signal)
     enqueue(&finished_pid_queue, pid, signal);
     to_free = task;
 
-    if (current_task == task)
-        scheduler();
+    /* should we call scheduler()? */
 }
 
 static void task_exit_pid(pid_t task_id)
@@ -763,17 +694,16 @@ void task_1(void)
     kfree(user_buffer);
     // puts_color("test_mmap: mmap/munmap test passed\n", GREEN);
 
-    signal(2, task_1_sighandler);
+    sys_signal(2, task_1_sighandler);
 
     while (1)
     {
         int return_value;
-        return_value = write(3, "Task 1\n", 7);
+        return_value = sys_write(3, "Task 1\n", 7);
         if (return_value > 0) // it must fail so not failing it's indeed a fail
         {
             puts_color("Error writing\n", RED);
         }
-        scheduler();
     }
 }
 
@@ -793,8 +723,7 @@ void socket_1()
 
     while(1)
     {
-        write(sock, buffer, strlen(buffer));
-        scheduler();
+        sys_write(sock, buffer, strlen(buffer));
     }
 
 }
@@ -815,11 +744,11 @@ void socket_2()
     }
 
     printf("sleeping for 5 seconds '%d'\n", get_kuptime());
-    sleep(5);
+    sys_sleep(5);
 
     while(1)
     {
-        return_value = read(sock, buffer, sizeof(buffer));
+        return_value = sys_read(sock, buffer, sizeof(buffer));
         if (return_value < 0)
         {
             // enable_print();
@@ -831,8 +760,7 @@ void socket_2()
         //     puts_color(read_str, GREEN);
         //     puts_color(buffer, GREEN);
         // }
-        sleep(3);
-        scheduler();
+        sys_sleep(3);
     }
 
 }
@@ -842,7 +770,6 @@ void recursion()
     static unsigned int i = 0;
     // puts("Recursion\n" );
     printf("Recursion %d\n", i++);
-    scheduler();
     recursion();
 }
 
@@ -868,7 +795,7 @@ void task_read()
     char* fd_str = "fd: %d\n";
 
     fd_str = "fd: '%d'\n";
-    fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC);
+    fd = sys_open(filename, O_WRONLY | O_CREAT | O_TRUNC);
     if (fd < 0)
     {
         puts_color("Failed to open /boot/task_read\n", RED);
@@ -877,8 +804,8 @@ void task_read()
 
     printf(fd_str, fd);
 
-    write(fd, buffer, 10);
-    close(fd);
+    sys_write(fd, buffer, 10);
+    sys_close(fd);
 
     memset(buffer, 0, sizeof(buffer));
     // while (1)
@@ -894,13 +821,13 @@ void task_read()
 
     while (1)
     {
-        fd = open(filename, O_RDONLY);
+        fd = sys_open(filename, O_RDONLY);
         if (fd < 0)
         {
             puts_color("Failed to open /boot/task_read\n", RED);
             return;
         }
-        return_value = read(fd, buffer, sizeof(buffer));
+        return_value = sys_read(fd, buffer, sizeof(buffer));
         // return_value = read(0, buffer, sizeof(buffer));
         // return_value = write(3, buffer, return_value); // error writing to fd 3
         if (return_value <= 0)
@@ -917,8 +844,7 @@ void task_read()
             // puts_color(read_str, GREEN);
             // puts_color(buffer, GREEN);
         }
-        close(fd);
-        yeld();
+        sys_close(fd);
     }
 
 }
@@ -1057,34 +983,14 @@ void task_wait()
         set_putchar_color(LIGHT_GREY);
  
         // puts("Task 5\n");
-        scheduler();
     }
 }
-
-void user_task()
-{
-
-    // while(1);
-
-    while(1)
-    {
-        write(3, "User task\n", 10);
-        yeld();
-    }
-}
-
-#include "../user/ushell/ushell.h"
 
 void unsleep_kshell()
 {
     /* Assuming kshell it's allways 1. */
     task_t *kshell = get_task_by_pid(1);
     kshell->state = TASK_READY;
-}
-
-void start_user()
-{
-    create_task(ushell, "ushell", unsleep_kshell);
 }
 
 void kshell();

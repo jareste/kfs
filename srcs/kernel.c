@@ -92,7 +92,6 @@ void kernel_main(uint32_t magic, multiboot_info_t *mbi)
 
     enable_interrupts();
     outb(0x20, 0x20);
-    scheduler();
     start_foo_tasks();
     set_run_scheduler(1);
 

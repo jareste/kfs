@@ -26,7 +26,7 @@ static void time_cleanup(module_t *self)
 static void time_on_request(module_t *self, struct time_info *timeData)
 {
     char* str = "[Time Module] Current time is %d.\n";
-    timeData->current_time = time(NULL);
+    timeData->current_time = sys_time(NULL); /* no need to go through int, as we are in kernel. */
     // printf(str, (long)timeData->current_time);
 }
 

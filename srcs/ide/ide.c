@@ -32,7 +32,6 @@ static void sema_wait(semaphore* sem)
             break;
         }
         asm volatile("sti; hlt; cli");
-        // scheduler();
     }
 }
 

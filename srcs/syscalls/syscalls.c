@@ -143,12 +143,6 @@ int syscall_handler(registers reg)
         printf("Unknown syscall: %d\n", syscall_number);
         return -1;
     }
-    
-    // while (syscall_happening)
-    // {
-    //     scheduler();
-    // }
-    // syscall_happening = true;
 
     syscall_entry_t entry = syscall_table[syscall_number];
 
@@ -183,9 +177,6 @@ int syscall_handler(registers reg)
             break;
     }
 
-    scheduler();
-
-    // syscall_happening = false;
     return ret_value.int_value;
 }
 
@@ -245,12 +236,6 @@ void init_syscalls()
         .ret_value_entry = RET_INT,
         .num_args = 2,
         .handler.handler = (void*)sys_kill,
-    };
-
-    syscall_table[SYS_SCHED_YIELD] = (syscall_entry_t){
-        .ret_value_entry = RET_INT,
-        .num_args = 0,
-        .handler.handler = (void*)scheduler,
     };
 
     syscall_table[SYS_FORK] = (syscall_entry_t){

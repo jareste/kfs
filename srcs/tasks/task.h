@@ -64,7 +64,6 @@ typedef struct task_struct
     /* missing fields but untill it'll not work makes no sense to add them */    
 } task_t;
 
-void scheduler(void);
 void start_foo_tasks(void);
 void scheduler_init(void);
 task_t* get_task_by_pid(pid_t pid);

@@ -6,7 +6,6 @@
 #include "../umgmnt/users.h"
 #include "../ide/fs.h"
 #include "kshell.h"
-#include "../../srcs/user/syscalls/stdlib.h"
 #include "../tasks/task.h"
 
 #include "../ide/ext2_fileio.h"
@@ -188,7 +187,7 @@ static void ks_kill()
 
     signal = (int)hex_string_to_int(buffer);
     printf("Killing PID: %d with signal: %d\n", pid, signal);
-    kill(pid, signal); /* this kill is the one wrapped into interrupt */
+    sys_kill(pid, signal); /* this kill is the one wrapped into interrupt */
 }
 
 static void task_1_sighandler(int signal)
@@ -210,8 +209,8 @@ static void ks_signal()
     buffer = get_line();
 
     signum = (int)hex_string_to_int(buffer);
-    printf("signaling PID: %d with signal: %d\n", pid, signal);
-    signal(pid, task_1_sighandler); /* this kill is the one wrapped into interrupt */
+    printf("signaling PID: %d with signal: %d\n", pid, signum);
+    sys_signal(pid, task_1_sighandler); /* this kill is the one wrapped into interrupt */
 }
 
 static void color()
@@ -428,7 +427,7 @@ static void trigger_interrupt_software_6()
 
 static void ks_get_pid()
 {
-    printf("PID: %d\n", get_pid());
+    printf("PID: %d\n", sys_get_pid());
 }
 
 void test_syscall_read()
@@ -483,7 +482,7 @@ void test_syscall()
     size_t msg_len = strlen(msg);
 
     puts_color("TEST_WRITE\n", LIGHT_MAGENTA);
-    return_value = write(1, msg, msg_len);
+    return_value = sys_write(1, msg, msg_len);
     printf("SYS_WRITE return value: %d\n", return_value);
     
     test_syscall_read();
@@ -499,7 +498,7 @@ static void ks_read_mod_kb()
     char* filename = "/dev/keyboard_module";
     char* print_string = "Read from keyboard module: '%s'\n";
     char* failed = "Failed to open /dev/keyboard_module\n";
-    fd = open(filename, O_RDONLY);
+    fd = sys_open(filename, O_RDONLY);
     if (fd < 0)
     {
         puts_color(failed, RED);
@@ -508,13 +507,13 @@ static void ks_read_mod_kb()
     while (1)
     {
         memset(buffer, 0, sizeof(buffer));
-        n = read(fd, buffer, sizeof(buffer) - 1);
+        n = sys_read(fd, buffer, sizeof(buffer) - 1);
         buffer[n] = 0;
         printf(print_string, buffer);
         if (n == 0)
             break;
     }
-    close(fd);
+    sys_close(fd);
 }
 
 static void ks_unreg_mod_kb()
@@ -533,7 +532,6 @@ void kshell()
     print_date();
     while (1)
     {
-        scheduler();
         // tty_save_to_file("/dev/tty");
         printf("jareste-OS> ");
         buffer = get_line();
