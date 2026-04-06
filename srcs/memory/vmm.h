@@ -131,10 +131,15 @@ uint32_t vmm_get_physical(page_directory_t *dir, uint32_t virt);
  */
 void vmm_switch_directory(page_directory_t *dir);
 
+void vmm_set_kernel_dir(void);
+
 /*
  * vmm_current_directory - return the currently active page directory.
  */
 page_directory_t *vmm_current_directory(void);
+
+
+page_directory_t* vmm_clone_directory(page_directory_t *src);
 
 /*
  * vmm_alloc_page - allocate a physical frame and map it at @virt.

@@ -1,9 +1,11 @@
-NAME = libkfs_stdlib.a
+NAME = ushell
+
+KFS_STDLIB_PATH = ../../stdlib
 
 CC = cc
 AS = nasm
 CFLAGS = -m32 -static -nostdlib -nostartfiles -ffreestanding -fno-pic -fno-pie -Wl,--build-id=none
-ASMFLAGS = -f elf32
+ASMFLAGS = -f elf32 
 # LDFLAGS = -m elf_i386 -static -nostdlib -nostartfiles -ffreestanding -fno-pic -fno-pie
 
 SRC_DIR = syscalls
@@ -11,9 +13,8 @@ vpath %.c $(SRC_DIR)
 
 vpath %.asm $(SRC_DIR)
 
-FILES_ASM = close exit fork get_pid kill open read signal sleep \
-			time usleep write
-FILES_C = 
+FILES_ASM = 
+FILES_C = ushell
 
 SRCS_ASM = $(addsuffix .asm, $(FILES_ASM))
 SRCS_C = $(addsuffix .c, $(FILES_C))
@@ -28,11 +29,11 @@ DEP = $(addsuffix .d, $(basename $(OBJS)))
 all: .gitignore $(NAME)
 
 $(NAME): $(OBJS)
-	ar rcs $(NAME) $(OBJS)
+	$(CC) $(CFLAGS) -e main $(OBJS) -L$(KFS_STDLIB_PATH) -lkfs_stdlib -o $(NAME)
 
 $(OBJ_DIR)/%.o: %.c
 	@mkdir -p $(@D)
-	$(CC) -MMD $(CFLAGS) -c $< -o $@
+	$(CC) -MMD $(CFLAGS) -I$(KFS_STDLIB_PATH) -c $< -o $@
 
 $(OBJ_DIR)/%.o: %.asm
 	@mkdir -p $(@D)

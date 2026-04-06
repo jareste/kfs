@@ -141,7 +141,10 @@ format: crdisk
 	# sudo cp users.config mnt_ext2/etc/.
 # 	sudo gcc -m32 -nostdlib -static -o mnt_ext2/hello test/hello.c
 	sudo gcc -m32 -static -nostdlib -nostartfiles -ffreestanding -fno-pic -fno-pie -Wl,--build-id=none -o hello test/hello.c
+	sudo gcc -m32 -static -nostdlib -nostartfiles -ffreestanding -fno-pic -fno-pie -Wl,--build-id=none -o hello2 test/hello2.c uspace/stdlib/libkfs_stdlib.a
 	sudo cp hello mnt_ext2/.
+	sudo cp hello2 mnt_ext2/.
+	sudo cp ushell mnt_ext2/.
 	sudo cp users.config mnt_ext2/.
 	sudo rm -rf lost+found
 	sudo umount mnt_ext2

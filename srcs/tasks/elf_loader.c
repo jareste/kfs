@@ -27,7 +27,7 @@ static int elf_validate(elf32_ehdr_t *hdr)
     return 0;
 }
 
-static uint32_t elf_load(uint8_t *binary)
+static uint32_t elf_load(uint8_t* binary)
 {
     elf32_ehdr_t *ehdr = (elf32_ehdr_t*)binary;
 
@@ -84,6 +84,7 @@ static uint32_t elf_load(uint8_t *binary)
 
 void exec_bin(const char* path)
 {
+    page_directory_t *task_dir;
     uint32_t entry;
     ssize_t file_size;
     uint8_t *binary;
@@ -113,6 +114,12 @@ void exec_bin(const char* path)
     }
     sys_close(fd);
 
+    pause_scheduler(1); /* prevent context switch that would ruin this logic. */
+    task_dir = vmm_clone_directory(vmm_current_directory());
+    
+    /* Change context to properly be able to create a task */
+    vmm_switch_directory(task_dir);
+
     entry = elf_load(binary);
     if (entry == 0)
     {
@@ -121,9 +128,13 @@ void exec_bin(const char* path)
         return;
     }
 
-    create_user_task_at(entry, path, NULL);
+    create_user_task_at(entry, path, NULL, task_dir);
+
+    vmm_set_kernel_dir();
+
+    pause_scheduler(0); /* re-enable scheduling */
 
     kfree(binary);
 
-    return ;
+    return;
 }

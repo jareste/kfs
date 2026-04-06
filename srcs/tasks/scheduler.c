@@ -155,6 +155,29 @@ void free_finished_tasks()
         kfree((void*)to_free->stack);
     if (to_free->stub_page)
         vfree((void*)to_free->stub_page);
+#warning "This might not be working, check it out"
+    if (to_free->page_dir)
+    {
+        for (int32_t i = 0; i < 1024; i++)
+        {
+            uint32_t virt_start = i * 4 * 1024 * 1024;
+            if (virt_start < 0x08000000 || virt_start >= 0x0C000000)
+                continue;
+            if (!to_free->page_dir->entries[i])
+                continue;
+
+            page_table_t *tbl = (page_table_t*)
+                (to_free->page_dir->entries[i] & 0xFFFFF000);
+            for (int32_t j = 0; j < 1024; j++)
+            {
+                if (tbl->entries[j] & PAGE_PRESENT)
+                    pmm_free_frame(tbl->entries[j] & 0xFFFFF000);
+            }
+            pmm_free_frame((uint32_t)tbl);
+        }
+        pmm_free_frame((uint32_t)to_free->page_dir);
+        to_free->page_dir = NULL;
+    }
     kfree(to_free);
     to_free = NULL;
 }
@@ -284,6 +307,22 @@ void set_run_scheduler(int value)
     m_let_scheduler_run = value;
 }
 
+#warning "I use this function as a kind of lock to prevent scheduler from running in critical sections, but maybe it would be better to implement a more robust locking mechanism."
+void pause_scheduler(int pause)
+{
+    static int prev_value = 0;
+    if (pause && prev_value == 0)
+    {
+        prev_value = m_let_scheduler_run;
+        m_let_scheduler_run = 0;
+    }
+    else
+    {
+        m_let_scheduler_run = prev_value;
+        prev_value = 0;
+    }
+}
+
 uint32_t timer_schedule(uint32_t *iframe_esp)
 {
     static int inside_timer_schedule = 0;
@@ -311,6 +350,12 @@ uint32_t timer_schedule(uint32_t *iframe_esp)
 
     tss_set_stack(next->kernel_stack);
     set_active_env(next->env);
+
+#warning "This might cause problems as by default tasks would not have page dir, so they would be switched to kernel dir, but maybe it's not a problem as kernel tasks don't need it. Just keep it in mind."
+    if (next->page_dir)
+        vmm_switch_directory(next->page_dir);
+    else
+        vmm_set_kernel_dir();
 
     inside_timer_schedule = 0;
     return next->cpu.esp_;
@@ -849,23 +894,20 @@ void task_read()
 
 }
 
+/* It needs to get a new page directory if i would want it to work again. */
 void create_user_code_task(char *name)
 {
-    // vmalloc garantiza alineación a página
     uint8_t *code_page = vmalloc(PAGE_SIZE);
     uint8_t *data_page = vmalloc(PAGE_SIZE);
 
-    // Guardar físicas ANTES de unmap
     uint32_t code_pa = vmm_get_physical(vmm_current_directory(), (uint32_t)code_page);
     uint32_t data_pa = vmm_get_physical(vmm_current_directory(), (uint32_t)data_page);
 
-    // Ahora sí están alineadas, remap con PAGE_USER_RW
     vmm_unmap_page(vmm_current_directory(), (uint32_t)code_page);
     vmm_unmap_page(vmm_current_directory(), (uint32_t)data_page);
     vmm_map_page(vmm_current_directory(), (uint32_t)code_page, code_pa, PAGE_USER_RW);
     vmm_map_page(vmm_current_directory(), (uint32_t)data_page, data_pa, PAGE_USER_RW);
 
-    // Después del remap, verificar flags
     uint32_t *dir_entries = (uint32_t *)vmm_current_directory();
     uint32_t dir_idx = (uint32_t)code_page >> 22;
     uint32_t tbl_phys = dir_entries[dir_idx] & 0xFFFFF000;
@@ -874,10 +916,7 @@ void create_user_code_task(char *name)
     uint32_t pde_flags = dir_entries[dir_idx] & 0xFFF;
     printf("PDE flags for code_page: %x\n", pde_flags);
     printf("PTE flags for code_page: %x\n", tbl[tbl_idx] & 0xFFF);
-    // printf("PTE flags for code_page: 0x%x\n", tbl[tbl_idx] & 0xFFF);
-    // Debe ser 0x7 (PRESENT | RW | USER)
 
-    // Copiar datos y código
     memcpy(data_page, user_msg, sizeof(user_msg));
     memcpy(code_page, user_code, sizeof(user_code));
 
@@ -889,15 +928,14 @@ void create_user_code_task(char *name)
         putc(' ');
     }
     printf("\n");
-    // Parchear dirección del buffer en el mov ecx
     *(uint32_t *)(code_page + 11) = (uint32_t)data_page;
 
     printf("ecx patch at offset 11: %x\n", *(uint32_t*)(code_page + 11));
 
-    create_user_task_at((uint32_t)code_page, name, NULL);
+    create_user_task_at((uint32_t)code_page, name, NULL, NULL);
 }
 
-void create_user_task_at(uint32_t entry_addr, char *name, void (*on_exit)(void))
+void create_user_task_at(uint32_t entry_addr, char *name, void (*on_exit)(void), page_directory_t* _task_dir)
 {
     task_t *task = kmalloc(sizeof(task_t));
     memset(task, 0, sizeof(task_t));
@@ -905,31 +943,31 @@ void create_user_task_at(uint32_t entry_addr, char *name, void (*on_exit)(void))
     uint32_t *kernel_stack_base = kmalloc(STACK_SIZE);
     uint32_t *kernel_stack_top  = kernel_stack_base + STACK_SIZE / sizeof(uint32_t);
 
-    uint32_t ks_pa = vmm_get_physical(vmm_current_directory(), 
-                        (uint32_t)kernel_stack_top & 0xFFFFF000);
-    printf("kernel_stack_top=%x pa=%x\n", (uint32_t)kernel_stack_top, ks_pa);
+    task->page_dir = _task_dir;
 
-    uint32_t test_addr = (uint32_t)kernel_stack_top - 4;
-    uint32_t test_pa = vmm_get_physical(vmm_current_directory(), test_addr & 0xFFFFF000);
-    printf("kernel stack page pa=%x\n", test_pa);
+    page_directory_t *task_dir;
+    if (_task_dir)
+        task_dir = _task_dir;
+    else
+        task_dir = vmm_current_directory();
 
     uint32_t *user_stack_base = vmalloc(USER_STACK_SIZE);
     uint32_t user_pages = PAGE_ALIGN(USER_STACK_SIZE) / PAGE_SIZE;
     for (uint32_t i = 0; i < user_pages; i++)
     {
         uint32_t va = (uint32_t)user_stack_base + i * PAGE_SIZE;
-        uint32_t pa = vmm_get_physical(vmm_current_directory(), va);
-        vmm_unmap_page(vmm_current_directory(), va);
-        vmm_map_page(vmm_current_directory(), va, pa, PAGE_USER_RW);
+        uint32_t pa = vmm_get_physical(task_dir, va);
+        vmm_unmap_page(task_dir, va);
+        vmm_map_page(task_dir, va, pa, PAGE_USER_RW);
     }
 
     /* Create exit stub for enforcing all programs to exit cleanly */
     uint8_t *stub_page = vmalloc(PAGE_SIZE);
-    uint32_t stub_pa = vmm_get_physical(vmm_current_directory(), (uint32_t)stub_page);
-    vmm_unmap_page(vmm_current_directory(), (uint32_t)stub_page);
-    vmm_map_page(vmm_current_directory(), (uint32_t)stub_page, stub_pa, PAGE_USER_RW);
+    uint32_t stub_pa = vmm_get_physical(task_dir, (uint32_t)stub_page);
+    vmm_unmap_page(task_dir, (uint32_t)stub_page);
+    vmm_map_page(task_dir, (uint32_t)stub_page, stub_pa, PAGE_USER_RW);
 
-    uint32_t *dir = (uint32_t*)vmm_current_directory();
+    uint32_t *dir = (uint32_t*)task_dir;
     dir[(uint32_t)stub_page >> 22] |= PAGE_USER;
     __asm__ __volatile__("invlpg (%0)" : : "r"((uint32_t)stub_page) : "memory");
 
@@ -1003,8 +1041,10 @@ void start_foo_tasks(void)
     create_task(task_read, "task_read", NULL);
     create_task(socket_1, "socket_1", NULL);
     create_task(socket_2, "socket_2", NULL);
-    create_user_code_task("user_code_task");
+    // create_user_code_task("user_code_task");
     exec_bin("/hello");
+    exec_bin("/hello2");
+    // exec_bin("/ushell");
 
     to_free = NULL;
     // printf("current_task: %p\n", current_task);

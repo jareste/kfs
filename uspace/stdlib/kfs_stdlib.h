@@ -14,10 +14,8 @@ int get_pid();
 void exit(int status);
 int open(const char* path, int flags);
 int close(int fd);
-
 void sleep(uint32_t seconds);
 void usleep(uint32_t microseconds);
-
 time_t time(time_t* tloc);
 
 #endif

@@ -1,8 +1,5 @@
-#include "ushell.h"
-#include "../syscalls/stdlib.h"
-#include "../../utils/utils.h"
-
-#include "../../display/display.h"
+// #include "ushell.h"
+#include "kfs_stdlib.h"
 
 #define MAX_TOKENS 15
 
@@ -57,15 +54,15 @@ char* readline(char* prompt)
     if (!prompt)
         prompt = "$ ";
 
-    write(1, prompt, strlen(prompt));
+    // write(1, prompt, strlen(prompt));
 
-    memset(m_buffer, 0, 1024);
+    // memset(m_buffer, 0, 1024);
 
     bytes_read = read(0, buffer, 1024);
     if (bytes_read <= 0)
         return NULL;
 
-    memcpy(m_buffer, buffer, bytes_read);
+    // memcpy(m_buffer, buffer, bytes_read);
     m_buffer[bytes_read] = '\0';
     return m_buffer;
 }
@@ -77,19 +74,20 @@ void exec_builtin(char** argv, int argc)
     i = 0;
     while (builtins[i].cmd != NULL)
     {
-        if (strcmp(argv[0], builtins[i].cmd) == 0)
-        {
+        // if (strcmp(argv[0], builtins[i].cmd) == 0)
+        // {
 
-            user_cmds[builtins[i].def].handler(argv, argc);
-            return;
-        }
+        //     user_cmds[builtins[i].def].handler(argv, argc);
+        //     return;
+        // }
         i++;
     }
 
-    printf("Command '%s' not found\n", argv[0]);
+    // printf("Command '%s' not found\n", argv[0]);
 }
 
-void ushell(char** envp)
+// void main(int argc, char** argv, char** envp)
+void main()
 {
     char* buffer;
     char* tokens[MAX_TOKENS];
@@ -97,26 +95,29 @@ void ushell(char** envp)
     int len;
     int i;
 
+    // (void)argc;
+    // (void)argv;
     user_cmds[ECHO].handler = echo;
     user_cmds[EXIT].handler = u_exit;
     user_cmds[USLEEP].handler = u_usleep;
     user_cmds[SLEEP].handler = u_sleep;
     user_cmds[TIME].handler = u_time;
 
-    printf("Welcome to ushell\n");
+    get_pid();
+    // printf("Welcome to ushell\n");
     // print_env(); /* DEBUG */
     i = 0;
-    while (envp[i] != NULL)
-    {
-        printf("%s\n", envp[i]);
-        i++;
-    }
+    // while (envp[i] != NULL)
+    // {
+    //     // printf("%s\n", envp[i]);
+    //     i++;
+    // }
 
     while (1)
     {
-        buffer = readline(NULL);
-        if (!buffer)
-            continue;
+        // buffer = readline(NULL);
+        // if (!buffer)
+        //     continue;
 
         token_count = 0;
 
@@ -136,7 +137,7 @@ void ushell(char** envp)
         if (token_count > 0)
             exec_builtin(tokens, token_count);
     }
-    _exit(1);
+    exit(1);
 }
 
 void echo(char** argv, int argc)
@@ -145,7 +146,7 @@ void echo(char** argv, int argc)
     char* end = "\n";
     for (int i = 1; i < argc; i++)
     {
-        write(1, argv[i], strlen(argv[i]));
+        // write(1, argv[i], strlen(argv[i]));
         write(1, separator, 1);
     }
     write(1, end, 1);
@@ -182,22 +183,22 @@ void u_sleep(char** argv, int argc)
 {
     if (argc < 2)
     {
-        printf("Invalid number of arguments for sleep\n");
+        // printf("Invalid number of arguments for sleep\n");
         return;
     }
 
-    sleep(atoi(argv[1]));
+    // sleep(atoi(argv[1]));
 }
 
 void u_usleep(char** argv, int argc)
 {
     if (argc < 2)
     {
-        printf("Invalid number of arguments for usleep\n");
+        // printf("Invalid number of arguments for usleep\n");
         return;
     }
 
-    usleep(atoi(argv[1]));
+    // usleep(atoi(argv[1]));
 }
 
 void u_time(char** argv, int argc)
@@ -206,5 +207,5 @@ void u_time(char** argv, int argc)
     (void)argc;
     time_t t;
     time(&t);
-    printf("Current time: %d\n", t);
+    // printf("Current time: %d\n", t);
 }
