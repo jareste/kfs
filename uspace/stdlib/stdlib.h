@@ -1,6 +1,6 @@
 #ifndef STDLIB_H
 #define STDLIB_H
-#include "../../utils/stdint.h"
+#include "../../srcs/utils/stdint.h" /* Take same stdint as kernel has to avoid conflicts. */
 
 typedef void (*signal_handler_t)(int);
 
