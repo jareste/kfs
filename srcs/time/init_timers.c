@@ -118,7 +118,7 @@ void print_date()
 
     call_rtc(&full_year, &month, &day, &hour, &minute, &second);
 
-    printf("Current date: %d-%d-%d %d:%d:%d\n", full_year, month, day, hour, minute, second);
+    kprintf("Current date: %d-%d-%d %d:%d:%d\n", full_year, month, day, hour, minute, second);
     ts.tv_sec = rtc_to_epoch(full_year, month, day, hour, minute, second);
     ts.tv_nsec = 0;
     dispatch_time_request(&ts);

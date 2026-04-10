@@ -23,7 +23,7 @@ uint32_t hex_string_to_int(const char *hex_str)
         }
         else
         {
-            printf("invalid character in hex string: %c\n", hex_str[i]);
+            kprintf("invalid character in hex string: %c\n", hex_str[i]);
             return 0;
         }
     }

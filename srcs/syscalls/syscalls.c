@@ -81,13 +81,13 @@ int _sys_read(int fd, char* buf, size_t count)
 
 int _sys_open(const char* path, int flags)
 {
-    // printf("Syscall: open(%s, %d)\n", path, flags);
+    // kprintf("Syscall: open(%s, %d)\n", path, flags);
     return sys_open(path, flags);
 }
 
 int _sys_close(int fd)
 {
-    // printf("Syscall: close(%d)\n", fd);
+    // kprintf("Syscall: close(%d)\n", fd);
     return sys_close(fd);
 }
 
@@ -140,19 +140,13 @@ int syscall_handler(registers reg)
 
     if (syscall_number >= SYS_MAX_SYSCALL || syscall_table[syscall_number].handler.handler == NULL)
     {
-        printf("Unknown syscall: %d\n", syscall_number);
+        kprintf("Unknown syscall: %d\n", syscall_number);
         return -1;
     }
-    
-    // while (syscall_happening)
-    // {
-    //     scheduler();
-    // }
-    // syscall_happening = true;
 
     syscall_entry_t entry = syscall_table[syscall_number];
 
-    // printf("Syscall: %d\n", syscall_number);
+    // kprintf("Syscall: %d\n", syscall_number);
     syscall_return_t ret_value;
     switch (entry.num_args)
     {
@@ -178,14 +172,11 @@ int syscall_handler(registers reg)
             ret_value.int_value = ((syscall_handler_6_t)entry.handler.handler)(arg1, arg2, arg3, arg4, arg5, arg6);
             break;
         default:
-            printf("Invalid number of arguments for syscall %d\n", syscall_number);
+            kprintf("Invalid number of arguments for syscall %d\n", syscall_number);
             ret_value.int_value = -1;
             break;
     }
 
-    scheduler();
-
-    // syscall_happening = false;
     return ret_value.int_value;
 }
 
@@ -245,12 +236,6 @@ void init_syscalls()
         .ret_value_entry = RET_INT,
         .num_args = 2,
         .handler.handler = (void*)sys_kill,
-    };
-
-    syscall_table[SYS_SCHED_YIELD] = (syscall_entry_t){
-        .ret_value_entry = RET_INT,
-        .num_args = 0,
-        .handler.handler = (void*)scheduler,
     };
 
     syscall_table[SYS_FORK] = (syscall_entry_t){

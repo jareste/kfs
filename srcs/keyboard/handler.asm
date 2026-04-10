@@ -35,7 +35,6 @@ common_isr_handler:
 	cli
 	pusha
 
-	; call c function
 	call isr_handler
 
 	; restores registers
@@ -151,7 +150,7 @@ irq_handler_0:
     mov esp, eax
 
 .no_switch:
-    ; Leer CS del iret frame (después del pusha = 32 bytes, EIP = 4 bytes, CS en +36)
+    ; read CS from iret frame (pusha 32 + EIP 4 = CS 36)
     mov eax, [esp + 36]
     and eax, 0x3
     cmp eax, 3

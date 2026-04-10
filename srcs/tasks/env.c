@@ -233,7 +233,7 @@ void print_env(void)
         env_entry_t *entry = active_env->buckets[i];
         while (entry)
         {
-            printf("%s=%s\n", entry->key, entry->value);
+            kprintf("%s=%s\n", entry->key, entry->value);
             entry = entry->next;
         }
     }

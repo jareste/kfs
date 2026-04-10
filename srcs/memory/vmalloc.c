@@ -132,13 +132,13 @@ static void unmap_region_pages(uint32_t virt_start, uint32_t pages)
 
 void vmalloc_init(void)
 {
-    printf("Initializing vmalloc at %u\n", vbrk_cursor);
+    kprintf("Initializing vmalloc at %u\n", vbrk_cursor);
     region_list  = new_region(VMALLOC_START,
                                VMALLOC_END - VMALLOC_START,
                                1 /* free */);
     vbrk_cursor  = VMALLOC_START;
 
-    printf("[VMALLOC] arena %x - %x (%d MB)\n",
+    kprintf("[VMALLOC] arena %x - %x (%d MB)\n",
            VMALLOC_START, VMALLOC_END,
            (VMALLOC_END - VMALLOC_START) / (1024 * 1024));
 }
@@ -307,15 +307,15 @@ void vmalloc_dump(void)
 {
     vregion_t* r;
     uint32_t i;
-    printf("=== VMALLOC REGION DUMP ===\n");
-    printf("arena: 0x%x - 0x%x\n", VMALLOC_START, VMALLOC_END);
-    printf("vbrk cursor: 0x%x\n", vbrk_cursor);
+    kprintf("=== VMALLOC REGION DUMP ===\n");
+    kprintf("arena: 0x%x - 0x%x\n", VMALLOC_START, VMALLOC_END);
+    kprintf("vbrk cursor: 0x%x\n", vbrk_cursor);
 
     r = region_list;
     i = 0;
     while (r)
     {
-        printf("  [%d] %x - %x  size=%d  %s\n",
+        kprintf("  [%d] %x - %x  size=%d  %s\n",
                i,
                r->virt_start,
                r->virt_start + r->size,
@@ -324,7 +324,7 @@ void vmalloc_dump(void)
         r = r->next;
         i++;
     }
-    printf("=== END VMALLOC DUMP ===\n");
+    kprintf("=== END VMALLOC DUMP ===\n");
 }
 
 uint32_t vmalloc_free_bytes(void)

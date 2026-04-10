@@ -13,7 +13,7 @@ bool find_user_by_name(const char *name, user_t* u)
     fp = ext2_fopen(USERS_CONFIG, "r");
     if (!fp)
     {
-        // printf("Config file not found.\n");
+        // kprintf("Config file not found.\n");
         // if (strcmp(name, NO_USER_LOGIN) == 0)
         // {
         //     strcpy(u->name, "root");
@@ -23,7 +23,7 @@ bool find_user_by_name(const char *name, user_t* u)
         //     u->home_inode = 2;
         //     u->shell_inode = 2;
         //     u->is_valid = true;
-        //     printf("Login as root.\n");
+        //     kprintf("Login as root.\n");
         //     return true;
         // }
         return false;
@@ -39,7 +39,7 @@ bool find_user_by_name(const char *name, user_t* u)
     }
 
     ext2_fclose(fp);
-    // printf("User '%s' not found.\n", name);
+    // kprintf("User '%s' not found.\n", name);
     return false;
 }
 
@@ -55,7 +55,7 @@ void add_user(user_t *new_user)
 
     if (user_exists(new_user->name))
     {
-        printf("User '%s' already exists.\n", new_user->name);
+        kprintf("User '%s' already exists.\n", new_user->name);
         return;
     }
     fp = ext2_fopen(USERS_CONFIG, "a");
@@ -80,7 +80,7 @@ void list_users()
 
     while (ext2_fread(fp, &u, sizeof(user_t)))
     {
-        printf("User: '%s' %s\n", u.name, u.is_valid ? "active" : "deleted");
+        kprintf("User: '%s' %s\n", u.name, u.is_valid ? "active" : "deleted");
     }
 
     ext2_fclose(fp);

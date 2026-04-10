@@ -6,7 +6,6 @@
 #include "../umgmnt/users.h"
 #include "../ide/fs.h"
 #include "kshell.h"
-#include "../../srcs/user/syscalls/stdlib.h"
 #include "../tasks/task.h"
 
 #include "../ide/ext2_fileio.h"
@@ -148,7 +147,7 @@ static void kuptime()
 {
     uint64_t uptime;
     uptime = get_kuptime();
-    printf("Uptime: %d seconds\n", uptime);
+    kprintf("Uptime: %d seconds\n", uptime);
 }
 
 static void ksleep()
@@ -163,14 +162,14 @@ static void ksleep()
     // char* buffer;
     // uint32_t seconds;
 
-    // printf("Enter the number of seconds to sleep: ");
+    // kprintf("Enter the number of seconds to sleep: ");
     
     // buffer = get_line();
 
     // seconds = (uint32_t)hex_string_to_int(buffer);
-    // printf("Sleeping for %d seconds...\n", seconds);
+    // kprintf("Sleeping for %d seconds...\n", seconds);
     // sleep(seconds);
-    // printf("Woke up!\n");
+    // kprintf("Woke up!\n");
 }
 
 static void ks_kill()
@@ -179,16 +178,16 @@ static void ks_kill()
     pid_t pid;
     int signal;
 
-    printf("Enter the PID to kill: ");
+    kprintf("Enter the PID to kill: ");
     buffer = get_line();
     pid = (pid_t)hex_string_to_int(buffer);
-    printf("Enter the signal to send: ");
+    kprintf("Enter the signal to send: ");
 
     buffer = get_line();
 
     signal = (int)hex_string_to_int(buffer);
-    printf("Killing PID: %d with signal: %d\n", pid, signal);
-    kill(pid, signal); /* this kill is the one wrapped into interrupt */
+    kprintf("Killing PID: %d with signal: %d\n", pid, signal);
+    sys_kill(pid, signal); /* this kill is the one wrapped into interrupt */
 }
 
 static void task_1_sighandler(int signal)
@@ -202,16 +201,16 @@ static void ks_signal()
     pid_t pid;
     int signum;
 
-    printf("Enter the PID to kill: ");
+    kprintf("Enter the PID to kill: ");
     buffer = get_line();
     pid = (pid_t)hex_string_to_int(buffer);
-    printf("Enter the signal to send: ");
+    kprintf("Enter the signal to send: ");
 
     buffer = get_line();
 
     signum = (int)hex_string_to_int(buffer);
-    printf("signaling PID: %d with signal: %d\n", pid, signal);
-    signal(pid, task_1_sighandler); /* this kill is the one wrapped into interrupt */
+    kprintf("signaling PID: %d with signal: %d\n", pid, signum);
+    sys_signal(pid, task_1_sighandler); /* this kill is the one wrapped into interrupt */
 }
 
 static void color()
@@ -241,7 +240,7 @@ static void color()
     buffer = get_line();
 
     color = (uint32_t)hex_string_to_int(buffer);
-    printf("Color: %x\n", color);
+    kprintf("Color: %x\n", color);
     set_putchar_color(color);
     clear_kb_buffer();
 }
@@ -271,7 +270,7 @@ static void help()
         if (commands[i].desc == NULL)
             continue;
 
-        printf("  %s: %s\n", commands[i].cmd, commands[i].desc);
+        kprintf("  %s: %s\n", commands[i].cmd, commands[i].desc);
     }
 
 }
@@ -287,7 +286,7 @@ static void help_global()
         if (commands[i].desc == NULL)
             continue;
 
-        printf("  %s: %s\n", commands[i].cmd, commands[i].desc);
+        kprintf("  %s: %s\n", commands[i].cmd, commands[i].desc);
     }
 
 }
@@ -303,23 +302,23 @@ static void ks_kdump()
     uint32_t addr;
     uint32_t size;
 
-    printf("Known addresses:\n");
-    printf("  VIDEO_MEMORY: %x\n", VIDEO_MEMORY);
-    printf("  BANNER: %x\n", &BANNER);
-    printf("Enter the address to dump: ");
+    kprintf("Known addresses:\n");
+    kprintf("  VIDEO_MEMORY: %x\n", VIDEO_MEMORY);
+    kprintf("  BANNER: %x\n", &BANNER);
+    kprintf("Enter the address to dump: ");
     buffer = get_line();
     
     addr = (uint32_t)hex_string_to_int(buffer);
-    printf("Address: %x\n", addr);
+    kprintf("Address: %x\n", addr);
     
-    printf("Enter the size to dump: ");
+    kprintf("Enter the size to dump: ");
     buffer = get_line();
     size = (uint32_t)hex_string_to_int(buffer);
-    printf("Size: %x\n", size);
+    kprintf("Size: %x\n", size);
 
     if (size < 0 || size > 0x1000)
     {
-        printf("Invalid size. Size must be between 0 and 0x1000\n");
+        kprintf("Invalid size. Size must be between 0 and 0x1000\n");
         return;
     }
 
@@ -353,7 +352,7 @@ static void cmd_section()
     puts("Available sections:\n");
     for (i = 0; i < MAX_SECTIONS; i++)
     {
-        printf("  %d: %s\n", i, command_sections[i].name);
+        kprintf("  %d: %s\n", i, command_sections[i].name);
     }
     puts("Enter the section: ");
     buffer = get_line();
@@ -363,7 +362,7 @@ static void cmd_section()
         puts("Invalid section\n");
         return;
     }
-    printf("Section: %s\n", command_sections[section].name);
+    kprintf("Section: %s\n", command_sections[section].name);
     current_section = section;
 }
 
@@ -380,7 +379,7 @@ static bool check_global_cmd(char* cmd)
             }
             else
             {
-                printf("Not implemented yet\n");
+                kprintf("Not implemented yet\n");
             }
             return true;
         }
@@ -406,7 +405,7 @@ static void set_layout()
         puts("Invalid layout\n");
         return;
     }
-    printf("Layout: %d\n", layout);
+    kprintf("Layout: %d\n", layout);
     set_keyboard_layout(layout);
 }
 
@@ -423,12 +422,12 @@ static void trigger_interrupt_software_6()
 {    
     int j = 3;
     int i = 0;
-    printf("Kernel end: %d\n", j / i);
+    kprintf("Kernel end: %d\n", j / i);
 }
 
 static void ks_get_pid()
 {
-    printf("PID: %d\n", get_pid());
+    kprintf("PID: %d\n", sys_get_pid());
 }
 
 void test_syscall_read()
@@ -438,7 +437,7 @@ void test_syscall_read()
 
     memset(buffer, 0, sizeof(buffer));
     puts_color("TEST_READ\n", LIGHT_MAGENTA);
-    printf("Buffer before sys_read: %s\n", buffer);
+    kprintf("Buffer before sys_read: %s\n", buffer);
 
     asm volatile (
         "mov $2, %%eax\n"
@@ -452,7 +451,7 @@ void test_syscall_read()
         : "eax", "ebx", "ecx", "edx"
     );
 
-    printf("Buffer after sys_read: '");
+    kprintf("Buffer after sys_read: '");
     for (size_t i = 0; i < 10; i++)
     {
         if (buffer[i] == 0)
@@ -460,7 +459,7 @@ void test_syscall_read()
         putc(buffer[i]);
     }
     puts("'\n");
-    printf("SYS_READ return value: %d\n", return_value);
+    kprintf("SYS_READ return value: %d\n", return_value);
 }
 
 void test_syscall()
@@ -477,14 +476,14 @@ void test_syscall()
         :
         : "eax", "ebx"
     );
-    printf("SYS_EXIT return value: %d\n", return_value);
+    kprintf("SYS_EXIT return value: %d\n", return_value);
 
     const char* msg = "Hello, world!\n";
     size_t msg_len = strlen(msg);
 
     puts_color("TEST_WRITE\n", LIGHT_MAGENTA);
-    return_value = write(1, msg, msg_len);
-    printf("SYS_WRITE return value: %d\n", return_value);
+    return_value = sys_write(1, msg, msg_len);
+    kprintf("SYS_WRITE return value: %d\n", return_value);
     
     test_syscall_read();
 }
@@ -499,7 +498,7 @@ static void ks_read_mod_kb()
     char* filename = "/dev/keyboard_module";
     char* print_string = "Read from keyboard module: '%s'\n";
     char* failed = "Failed to open /dev/keyboard_module\n";
-    fd = open(filename, O_RDONLY);
+    fd = sys_open(filename, O_RDONLY);
     if (fd < 0)
     {
         puts_color(failed, RED);
@@ -508,13 +507,13 @@ static void ks_read_mod_kb()
     while (1)
     {
         memset(buffer, 0, sizeof(buffer));
-        n = read(fd, buffer, sizeof(buffer) - 1);
+        n = sys_read(fd, buffer, sizeof(buffer) - 1);
         buffer[n] = 0;
-        printf(print_string, buffer);
+        kprintf(print_string, buffer);
         if (n == 0)
             break;
     }
-    close(fd);
+    sys_close(fd);
 }
 
 static void ks_unreg_mod_kb()
@@ -533,9 +532,8 @@ void kshell()
     print_date();
     while (1)
     {
-        scheduler();
         // tty_save_to_file("/dev/tty");
-        printf("jareste-OS> ");
+        kprintf("jareste-OS> ");
         buffer = get_line();
 
         if (*buffer == 0)
@@ -545,7 +543,7 @@ void kshell()
          */
         // if (!current_user_is_valid() && strcmp(buffer, "login") != 0)
         // {
-        //     printf("Please login first\n");
+        //     kprintf("Please login first\n");
         //     continue;
         // }
 
@@ -560,12 +558,12 @@ void kshell()
                 if (commands[i].func)
                     commands[i].func();
                 else
-                    printf("Not implemented yet\n");
+                    kprintf("Not implemented yet\n");
                 break;
             }
         }
         if (i == MAX_SECTIONS_COMMANDS)
-            printf("Command '%s' not found. Type 'help' for a list of available commands\n",\
+            kprintf("Command '%s' not found. Type 'help' for a list of available commands\n",\
                 buffer, command_sections[current_section].name, current_section);
     }
 }

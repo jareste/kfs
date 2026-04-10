@@ -1,130 +1,186 @@
 #include "modules.h"
+#include "module_exports.h"
 #include "../ide/ext2_fileio.h"
+#include "../display/display.h"
+#include "../memory/memory.h"
 
-#define MAX_MODULES 10
+typedef struct module_node
+{
+    module_t* module;
+    struct module_node* next;
+} module_node_t;
 
-static module_t* registered_modules[MAX_MODULES];
+static module_node_t* module_list = NULL;
 static int module_count = 0;
+static int next_module_id = 1;
 
-// int delete_device_node(const char *dir, const char *name)
-// {
-//     // char path[256];
-//     // strcpy(path, dir);
-//     // strcat(path, "/");
-//     // strcat(path, name);
+static module_node_t *find_node(module_t *module)
+{
+    module_node_t *n;
 
-//     // uint32_t inode_num;
-//     // if (ext2_resolve_path(path, &inode_num) < 0)
-//     // {
-//     //     printf("delete_device_node: file not found '%s'\n", path);
-//     //     return -1;
-//     // }
+    for (n = module_list; n; n = n->next)
+        if (n->module == module)
+            return n;
+    return NULL;
+}
 
-//     // ext2_remove_dir_entry(inode_num);
-//     // ext2_free_inode(inode_num);
-// }
+static module_node_t *find_node_by_id(int module_id)
+{
+    module_node_t *n;
 
+    for (n = module_list; n; n = n->next)
+        if (n->module->module_id == module_id)
+            return n;
+    return NULL;
+}
+
+static module_node_t *find_node_by_name(const char *name)
+{
+    module_node_t *n;
+
+    for (n = module_list; n; n = n->next)
+        if (strcmp(n->module->name, name) == 0)
+            return n;
+    return NULL;
+}
+
+/* Public API */
 int register_module(module_t *module)
 {
-    if (module_count >= MAX_MODULES)
+    module_node_t* node;
+
+    if (!module || !module->name)
+        return -1;
+
+    if (find_node_by_name(module->name))
     {
-        printf("Error: Module registry full.\n");
+        kprintf("register_module: '%s' already registered\n", module->name);
         return -1;
     }
-    registered_modules[module_count++] = module;
-    module->module_id = module_count;
 
     if (create_device_node("/dev", module->name, module) < 0)
     {
-        printf("Error: Could not create /dev/%s\n", module->name);
+        kprintf("register_module: could not create /dev/%s\n", module->name);
         return -1;
     }
 
-    if (module->init)
+    node = kmalloc(sizeof(module_node_t));
+    if (!node)
     {
-        return module->init(module, NULL);
+        kprintf("register_module: out of memory\n");
+        delete_device_node("/dev", module->name);
+        return -1;
     }
+
+    module->module_id = next_module_id++;
+    node->module      = module;
+    node->next        = module_list;
+    module_list       = node;
+    module_count++;
+
     return 0;
 }
 
 int unregister_module(module_t *module)
 {
-    int found = 0;
-    for (int i = 0; i < module_count; i++)
+    module_node_t* dead;
+    module_node_t** cur;
+    if (!module)
+        return -1;
+
+    /* TODO if it would have any reference, i must check for it before deleting it. */
+    cur = &module_list;
+    while (*cur)
     {
-        if (registered_modules[i] == module)
+        if ((*cur)->module == module)
         {
+            dead = *cur;
+            *cur = dead->next;
+            module_count--;
+
             if (module->cleanup)
                 module->cleanup(module);
 
-            // Remove the device node: /dev/<module->name>
             delete_device_node("/dev", module->name);
-
-            for (int j = i; j < module_count - 1; j++)
-            {
-                registered_modules[j] = registered_modules[j + 1];
-            }
-            module_count--;
-            found = 1;
-            break;
+            kfree(dead);
+            return 0;
         }
+        cur = &(*cur)->next;
     }
-    if (!found)
-    {
-        printf("Error: Module not found.\n");
-        return -1;
-    }
-    return 0;
+
+    kprintf("unregister_module: '%s' not found\n", module->name);
+    return -1;
 }
 
+module_t *get_module_by_id(int module_id)
+{
+    module_node_t *n = find_node_by_id(module_id);
+    return n ? n->module : NULL;
+}
+
+module_t *get_module_by_name(const char *name)
+{
+    module_node_t *n = find_node_by_name(name);
+    return n ? n->module : NULL;
+}
+
+int get_module_count(void)
+{
+    return module_count;
+}
+
+/* Dispatchers */
 void dispatch_key_event(int key, int state)
 {
-    for (int i = 0; i < module_count; i++)
+    module_node_t *n;
+    module_t *m;
+
+    for (n = module_list; n; n = n->next)
     {
-        if (registered_modules[i]->on_key_event)
-            registered_modules[i]->on_key_event(registered_modules[i], key, state);
+        m = n->module;
+        if ((m->flags & MODULE_FLAG_KEYBOARD) && m->on_key_event)
+            m->on_key_event(key, state);
     }
 }
 
 void dispatch_cpu_cycle(void)
 {
-    for (int i = 0; i < module_count; i++)
+    module_node_t *n;
+    module_t *m;
+
+    for (n = module_list; n; n = n->next)
     {
-        if (registered_modules[i]->on_cpu_cycle)
-            registered_modules[i]->on_cpu_cycle(registered_modules[i]);
+        m = n->module;
+        if ((m->flags & MODULE_FLAG_CPU_CYCLE) && m->on_cpu_cycle)
+            m->on_cpu_cycle(m);
     }
 }
 
 void dispatch_time_request(struct time_info *timeData)
 {
-    for (int i = 0; i < module_count; i++)
+    module_node_t *n;
+    module_t *m;
+
+    for (n = module_list; n; n = n->next)
     {
-        if (registered_modules[i]->on_time_request)
-            registered_modules[i]->on_time_request(registered_modules[i], timeData);
+        m = n->module;
+        if ((m->flags & MODULE_FLAG_TIME) && m->on_time_request)
+            m->on_time_request(timeData);
     }
 }
 
-void dispatch_read_request(int i, char *buffer, size_t size, size_t* offset)
+void dispatch_read_request(int module_id, char *buffer, size_t size, size_t *offset)
 {
-    if (registered_modules[i]->read)
-        registered_modules[i]->read(registered_modules[i], buffer, size, offset);
-}
-
-module_t *get_module_by_id(int module_id)
-{
-    for (int i = 0; i < module_count; i++)
-    {
-        if (registered_modules[i]->module_id == module_id)
-            return registered_modules[i];
-    }
-    return NULL;
+    module_t *m = get_module_by_id(module_id);
+    if (m && m->read)
+        m->read(buffer, size, offset);
 }
 
 /* -------------------------------
-   Module memory ring implementation
+    Simple module memory allocator
    -------------------------------
 */
-#define MODULE_MEM_RING_SIZE (1024 * 1024) // 1 MB for modules
+#define MODULE_MEM_RING_SIZE (1024 * 1024)
 static uint8_t module_mem_ring[MODULE_MEM_RING_SIZE];
 static size_t mem_ring_offset = 0;
 
@@ -132,7 +188,7 @@ void *module_alloc(size_t size)
 {
     if (mem_ring_offset + size > MODULE_MEM_RING_SIZE)
     {
-        printf("Error: Module memory ring exhausted.\n");
+        kprintf("Error: Module memory ring exhausted.\n");
         return NULL;
     }
     void *ptr = &module_mem_ring[mem_ring_offset];

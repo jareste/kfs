@@ -69,7 +69,7 @@ void kernel_main(uint32_t magic, multiboot_info_t *mbi)
     // for (int i = 23000; i < max_loops; i++)
     // {
     //     ((uint32_t*)ptr)[i] = i;
-    //     printf("Wrote %d to %x\n", i, (uint32_t)ptr + i * 4096);
+    //     kprintf("Wrote %d to %x\n", i, (uint32_t)ptr + i * 4096);
     // }
     // /* read check */
     // for (int i = 23000; i < max_loops; i++)
@@ -77,7 +77,7 @@ void kernel_main(uint32_t magic, multiboot_info_t *mbi)
     //     uint32_t val = ((uint32_t*)ptr)[i];
     //     if (val != i)
     //         kpanic("vmalloc read/write check failed", 1);
-    //     printf("Read %d from %x\n", val, (uint32_t)ptr + i * 4096);
+    //     kprintf("Read %d from %x\n", val, (uint32_t)ptr + i * 4096);
     // }
     // vfree(ptr);
 
@@ -92,7 +92,6 @@ void kernel_main(uint32_t magic, multiboot_info_t *mbi)
 
     enable_interrupts();
     outb(0x20, 0x20);
-    scheduler();
     start_foo_tasks();
     set_run_scheduler(1);
 

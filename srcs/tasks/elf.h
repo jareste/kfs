@@ -4,6 +4,7 @@
 #include "../utils/stdint.h"
 
 #define ELF_MAGIC       0x464C457F  // "\x7FELF"
+#define ET_REL          1
 #define ET_EXEC         2
 #define EM_386          3
 #define PT_LOAD         1

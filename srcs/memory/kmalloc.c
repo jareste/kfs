@@ -63,7 +63,7 @@ uint32_t kbrk(int32_t increment)
     }
     if ((uint32_t)new_break_signed > heap_max)
     {
-        printf("kbrk: requested break %x exceeds heap_max %x\n",
+        kprintf("kbrk: requested break %x exceeds heap_max %x\n",
                (uint32_t)new_break_signed, heap_max);
         kpanic("kbrk: kernel heap exhausted (hit KERNEL_HEAP_MAX)", 1);
         return 0;
@@ -185,7 +185,7 @@ void kmalloc_init(uint32_t start)
     heap_head->next = 0;
     heap_head->prev = 0;
 
-    printf("[KMALLOC] heap @ %x - %x (max %x)\n",
+    kprintf("[KMALLOC] heap @ %x - %x (max %x)\n",
            heap_start, heap_end, heap_max);
 }
 
@@ -330,8 +330,8 @@ void kmalloc_dump(void)
     block_header_t *b;
     uint32_t idx;
 
-    printf("=== KMALLOC HEAP DUMP ===\n");
-    printf("heap: 0x%x - 0x%x\n", heap_start, heap_end);
+    kprintf("=== KMALLOC HEAP DUMP ===\n");
+    kprintf("heap: 0x%x - 0x%x\n", heap_start, heap_end);
 
     b = heap_head;
     idx = 0;
@@ -340,10 +340,10 @@ void kmalloc_dump(void)
     {
         if (!block_valid(b))
         {
-            printf("  [%d] CORRUPTED BLOCK @ 0x%x\n", idx, (uint32_t)b);
+            kprintf("  [%d] CORRUPTED BLOCK @ 0x%x\n", idx, (uint32_t)b);
             break;
         }
-        printf("  [%d] @ 0x%x  size=%-6d  %s\n",
+        kprintf("  [%d] @ 0x%x  size=%-6d  %s\n",
                idx,
                (uint32_t)b,
                b->size,
@@ -351,7 +351,7 @@ void kmalloc_dump(void)
         b = b->next;
         idx++;
     }
-    printf("=== END HEAP DUMP ===\n");
+    kprintf("=== END HEAP DUMP ===\n");
 }
 
 uint32_t kmalloc_free_bytes(void)

@@ -18,6 +18,11 @@ SECTIONS {
 
     .data : {
         *(.data)
+
+        . = ALIGN(4);
+        __ksymtab_start = .;
+        KEEP(*(__ksymtab))
+        __ksymtab_end = .;
     }
 
     .bss : {

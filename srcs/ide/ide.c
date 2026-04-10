@@ -32,7 +32,6 @@ static void sema_wait(semaphore* sem)
             break;
         }
         asm volatile("sti; hlt; cli");
-        // scheduler();
     }
 }
 
@@ -177,16 +176,16 @@ void ide_demo()
 
     ide_read_sector(0, read_buffer);
     
-    // printf("MBR Signature: ");
+    // kprintf("MBR Signature: ");
     // for(int i = 0; i < 16; i++)
     // {
-    //     printf("%x ", ((uint8_t*)read_buffer)[i]);
+    //     kprintf("%x ", ((uint8_t*)read_buffer)[i]);
     // }
-    // printf("\n");
+    // kprintf("\n");
     
     if(read_buffer[255] == 0xAA55) /* Boot signature */
     {
-        printf("Valid MBR boot signature\n");
+        kprintf("Valid MBR boot signature\n");
     }
 
     for(int i = 0; i < 256; i++)
@@ -202,11 +201,11 @@ void ide_demo()
     
     if(memcmp(write_buffer, read_buffer, 512))
     {
-        printf("Write verification failed!\n");
+        kprintf("Write verification failed!\n");
     }
     else
     {
-        printf("Write verification successful!\n");
+        kprintf("Write verification successful!\n");
     }
 
     kfree(read_buffer);

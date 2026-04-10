@@ -202,9 +202,9 @@ void pmm_init(multiboot_info_t *mbi)
     /* Also protect low memory (first 1 MB) – BIOS/GRUB data lives there */
     pmm_mark_region_used(0x0, 0x100000);
 
-    printf("[PMM] total frames : %d\n", total_frames);
-    printf("[PMM] free  frames : %d\n", free_count);
-    printf("[PMM] bitmap @ 0x%x (%d bytes)\n", (uint32_t)pmm_bitmap, bitmap_bytes);
+    kprintf("[PMM] total frames : %d\n", total_frames);
+    kprintf("[PMM] free  frames : %d\n", free_count);
+    kprintf("[PMM] bitmap @ 0x%x (%d bytes)\n", (uint32_t)pmm_bitmap, bitmap_bytes);
 }
 
 /* ------------------------------------------------------------------ */

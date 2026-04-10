@@ -1,7 +1,7 @@
 #include "display.h"
 #include "../utils/utils.h"
 
-int printf(const char *format, ...)
+int kprintf(const char *format, ...)
 {
     const char *traverse;
     int i;

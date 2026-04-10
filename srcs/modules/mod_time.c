@@ -12,22 +12,22 @@ struct time_info
 /* Module initialization */
 static int time_init(module_t *self, struct kernel_services *services)
 {
-    printf("[Time Module] Initialized.\n");
+    kprintf("[Time Module] Initialized.\n");
     return 0;
 }
 
 /* Module cleanup */
 static void time_cleanup(module_t *self)
 {
-    printf("[Time Module] Cleanup.\n");
+    kprintf("[Time Module] Cleanup.\n");
 }
 
 /* Callback for time requests */
 static void time_on_request(module_t *self, struct time_info *timeData)
 {
     char* str = "[Time Module] Current time is %d.\n";
-    timeData->current_time = time(NULL);
-    // printf(str, (long)timeData->current_time);
+    timeData->current_time = sys_time(NULL); /* no need to go through int, as we are in kernel. */
+    // kprintf(str, (long)timeData->current_time);
 }
 
 /* Define the module instance */
@@ -41,10 +41,10 @@ module_t time_module = {
     .on_key_event = NULL,
     .on_cpu_cycle = NULL,
     .on_time_request = time_on_request,
-    .private_data = NULL
 };
 
 void register_time_module()
 {
+    return;
     register_module(&time_module);
 }

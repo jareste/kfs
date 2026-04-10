@@ -17,7 +17,6 @@ char* get_line()
         {
             putc(c);
         }
-        scheduler();
     }
     if (get_current_task()->screen_echo == true && c != '\0')
     {

@@ -145,6 +145,15 @@ uint32_t vmm_get_physical(page_directory_t *dir, uint32_t virt)
     return (tbl->entries[ti] & PAGE_FRAME_MASK) + VMM_OFFSET(virt);
 }
 
+void vmm_set_kernel_dir(void)
+{
+    current_dir = &kernel_directory;
+     __asm__ __volatile__(
+        "mov %0, %%cr3"
+        : : "r"((uint32_t)&kernel_directory) : "memory"
+    );
+}
+
 void vmm_switch_directory(page_directory_t *dir)
 {
     current_dir = dir;
@@ -157,6 +166,28 @@ void vmm_switch_directory(page_directory_t *dir)
 page_directory_t *vmm_current_directory(void)
 {
     return current_dir;
+}
+
+page_directory_t* vmm_clone_directory(page_directory_t *src)
+{
+    uint32_t phys = pmm_alloc_frame();
+    page_directory_t *dir = (page_directory_t*)phys;
+    memset(dir, 0, sizeof(page_directory_t));
+
+    for (int32_t i = 0; i < 1024; i++)
+    {
+        if (!src->entries[i])
+            continue;
+
+        uint32_t virt_start = i * 4 * 1024 * 1024;
+
+        if (virt_start >= 0x08000000 && virt_start < 0x0C000000)
+            continue;
+
+        dir->entries[i] = src->entries[i];
+    }
+
+    return dir;
 }
 
 uint32_t vmm_alloc_page(page_directory_t *dir, uint32_t virt, uint32_t flags)
@@ -203,7 +234,7 @@ void vmm_free_page(page_directory_t *dir, uint32_t virt)
 //             vmm_map_page(&kernel_directory, a, a, PAGE_KERNEL_RW);
 //     }
 
-//     printf("[VMM] identity-mapped 0x0 - 0x%x\n",
+//     kprintf("[VMM] identity-mapped 0x0 - 0x%x\n",
 //            (kernel_top > identity_end ? kernel_top : identity_end));
 
 //     /*
@@ -226,7 +257,7 @@ void vmm_free_page(page_directory_t *dir, uint32_t virt)
 //         : : "r"((uint32_t)&kernel_directory) : "eax", "memory"
 //     );
 
-//     printf("[VMM] paging enabled\n");
+//     kprintf("[VMM] paging enabled\n");
 // }
 
 void vmm_init(void)
@@ -271,7 +302,7 @@ void vmm_init(void)
     for (uint32_t phys = 0; phys < total_phys_bytes; phys += PAGE_SIZE)
         vmm_map_page(&kernel_directory, phys, phys, PAGE_KERNEL_RW);
  
-    printf("[VMM] identity-mapped 0x0 - %x (%d MB)\n",
+    kprintf("[VMM] identity-mapped 0x0 - %x (%d MB)\n",
            total_phys_bytes, total_phys_bytes / (1024 * 1024));
  
     /*
@@ -294,5 +325,5 @@ void vmm_init(void)
         : : "r"((uint32_t)&kernel_directory) : "eax", "memory"
     );
  
-    printf("[VMM] paging enabled\n");
+    kprintf("[VMM] paging enabled\n");
 }

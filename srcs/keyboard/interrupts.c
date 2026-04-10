@@ -23,9 +23,9 @@ void print_enabled_interrupts_asm()
     uint32_t eflags;
     __asm__ __volatile__("pushf; pop %0" : "=r"(eflags));
     if (eflags & (1 << 9))
-        printf("Interrupts are enabled from asm\n");
+        kprintf("Interrupts are enabled from asm\n");
     else
-        printf("Interrupts are disabled from asm\n");
+        kprintf("Interrupts are disabled from asm\n");
 }
 
 void print_enabled_interrupts()
@@ -33,9 +33,9 @@ void print_enabled_interrupts()
     uint32_t eflags;
     __asm__ __volatile__("pushf; pop %0" : "=r"(eflags));
     if (eflags & (1 << 9))
-        printf("Interrupts are enabled\n");
+        kprintf("Interrupts are enabled\n");
     else
-        printf("Interrupts are disabled\n");
+        kprintf("Interrupts are disabled\n");
 }
 
 void enable_interrupts(void)
@@ -57,55 +57,55 @@ void page_fault_handler(registers* regs, error_state* stack)
     task_t *task = get_current_task();
     if (task)
     {
-        printf("Task(%d) '%s': \n", task->pid, task->name);
+        kprintf("Task(%d) '%s': \n", task->pid, task->name);
     }
 
-    printf("EIP=%x CS=%x fault_addr=%x err=%x\n",
+    kprintf("EIP=%x CS=%x fault_addr=%x err=%x\n",
            stack->eip, stack->cs, faulting_address, stack->err_code);
 
     if ((stack->cs & 0x3) == 3)
     {
         error_state_user_t *ustack = (error_state_user_t*)stack;
-        printf("EFLAGS=%x ESP_user=%x SS_user=%x\n",
+        kprintf("EFLAGS=%x ESP_user=%x SS_user=%x\n",
                ustack->eflags, ustack->esp_user, ustack->ss_user);
     }
 
-    printf("EIP at fault: %x\n", stack->eip);
-    printf("CS  at fault: %x\n", stack->cs);
-    printf("Page fault at 0x");
+    kprintf("EIP at fault: %x\n", stack->eip);
+    kprintf("CS  at fault: %x\n", stack->cs);
+    kprintf("Page fault at 0x");
     put_hex(faulting_address);
     putc('\n');
-    printf("Error code: 0x");
+    kprintf("Error code: 0x");
     put_hex(stack->err_code);
     putc('\n');
 
-    printf("Error type: ");
+    kprintf("Error type: ");
     if (!(stack->err_code & PF_PRESENT))
-        printf("non-present page | ");
+        kprintf("non-present page | ");
     else
-        printf("protection violation | ");
+        kprintf("protection violation | ");
 
     if (stack->err_code & PF_WRITE)
-        printf("write access | ");
+        kprintf("write access | ");
     else
-        printf("read access | ");
+        kprintf("read access | ");
 
     if (stack->err_code & PF_USER)
-        printf("user mode");
+        kprintf("user mode");
     else
-        printf("kernel mode");
+        kprintf("kernel mode");
 
     if (stack->err_code & PF_RESERVED)
-        printf(" | reserved bit set");
+        kprintf(" | reserved bit set");
 
     if (stack->err_code & PF_IFETCH)
-        printf(" | instruction fetch");
+        kprintf(" | instruction fetch");
 
 
-    printf("\nKernel uptime: %d\n", get_kuptime());
+    kprintf("\nKernel uptime: %d\n", get_kuptime());
 
 
-    printf("Killing task %d due to page fault.\n", task->pid);
+    kprintf("Killing task %d due to page fault.\n", task->pid);
     _exit(-1);  // or call kill_task() as appropriate
 }
 /* PAGE FAULT HANDLER */
@@ -117,7 +117,7 @@ void isr_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_state
     UNUSED(err_code)
     UNUSED(intr_no)
 
-    // printf("Interrupt SW number: %d\n", intr_no);
+    // kprintf("Interrupt SW number: %d\n", intr_no);
 
     if (intr_no == 14 || intr_no == 13)
     {
@@ -146,7 +146,7 @@ void irq_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_state
     // if (timer_ticks % 200 == 0)
     // {
     //     timer_ticks = 0;
-    //     // printf("Switching tasks\n");
+    //     // kprintf("Switching tasks\n");
     // }
 
     if(intr_no >= 8)
@@ -156,8 +156,6 @@ void irq_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_state
     switch (intr_no)
     {
         case 0:
-            // scheduler();
-            // disable_interrupts();
             irq_handler_timer();
             break;
         case 1:
@@ -167,9 +165,9 @@ void irq_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_state
             ide_irq_handler();
             break;
         default:
-        printf("eax: %d\n", reg.eax);
-        printf("ebx: %d\n", reg.ebx);
-            printf("Interrupt HW number: %d\n", intr_no);
+        kprintf("eax: %d\n", reg.eax);
+        kprintf("ebx: %d\n", reg.ebx);
+            kprintf("Interrupt HW number: %d\n", intr_no);
             kpanic("Unknown interrupt", 1);
     }
 }

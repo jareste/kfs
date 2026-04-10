@@ -35,7 +35,10 @@ char get_last_char()
 char get_last_char_blocking()
 {
     char c;
-    while ((c = get_last_char()) == '\0') scheduler();
+    while ((c = get_last_char()) == '\0')
+    {
+        asm volatile("hlt;");
+    }
     return c;
 }
 

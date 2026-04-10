@@ -41,7 +41,7 @@ int put_hex(uint32_t n);
 int put_2_hex(uint8_t n);
 void put_zu(size_t value);
 
-int printf(const char *format, ...);
+int kprintf(const char *format, ...);
 
 
 void clear_screen();

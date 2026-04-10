@@ -7,7 +7,6 @@
 #include "../keyboard/signals.h"
 #include "../gdt/gdt.h"
 #include "../kshell/kshell.h"
-#include "../user/syscalls/stdlib.h"
 #include "../utils/queue.h"
 #include "../sockets/socket.h"
 #include "../display/tty/tty.h"
@@ -156,6 +155,29 @@ void free_finished_tasks()
         kfree((void*)to_free->stack);
     if (to_free->stub_page)
         vfree((void*)to_free->stub_page);
+#warning "This might not be working, check it out"
+    if (to_free->page_dir)
+    {
+        for (int32_t i = 0; i < 1024; i++)
+        {
+            uint32_t virt_start = i * 4 * 1024 * 1024;
+            if (virt_start < 0x08000000 || virt_start >= 0x0C000000)
+                continue;
+            if (!to_free->page_dir->entries[i])
+                continue;
+
+            page_table_t *tbl = (page_table_t*)
+                (to_free->page_dir->entries[i] & 0xFFFFF000);
+            for (int32_t j = 0; j < 1024; j++)
+            {
+                if (tbl->entries[j] & PAGE_PRESENT)
+                    pmm_free_frame(tbl->entries[j] & 0xFFFFF000);
+            }
+            pmm_free_frame((uint32_t)tbl);
+        }
+        pmm_free_frame((uint32_t)to_free->page_dir);
+        to_free->page_dir = NULL;
+    }
     kfree(to_free);
     to_free = NULL;
 }
@@ -206,7 +228,6 @@ void schedule_task_sleep(task_t* task, uint64_t seconds)
 {
     task->state = TASK_SLEEPING;
     task->wake_tick = seconds;
-    scheduler();
 }
 
 pid_t _wait(int* status)
@@ -215,12 +236,9 @@ pid_t _wait(int* status)
     pid_t pid = dequeue(&finished_pid_queue, &data);
     if (pid == 0)
     {
-        scheduler();
         while (pid == 0)
         {
             pid = dequeue(&finished_pid_queue, &data);
-            if (pid == 0)
-                scheduler();
         }
     }
     if (status)
@@ -289,6 +307,22 @@ void set_run_scheduler(int value)
     m_let_scheduler_run = value;
 }
 
+#warning "I use this function as a kind of lock to prevent scheduler from running in critical sections, but maybe it would be better to implement a more robust locking mechanism."
+void pause_scheduler(int pause)
+{
+    static int prev_value = 0;
+    if (pause && prev_value == 0)
+    {
+        prev_value = m_let_scheduler_run;
+        m_let_scheduler_run = 0;
+    }
+    else
+    {
+        m_let_scheduler_run = prev_value;
+        prev_value = 0;
+    }
+}
+
 uint32_t timer_schedule(uint32_t *iframe_esp)
 {
     static int inside_timer_schedule = 0;
@@ -317,71 +351,14 @@ uint32_t timer_schedule(uint32_t *iframe_esp)
     tss_set_stack(next->kernel_stack);
     set_active_env(next->env);
 
+#warning "This might cause problems as by default tasks would not have page dir, so they would be switched to kernel dir, but maybe it's not a problem as kernel tasks don't need it. Just keep it in mind."
+    if (next->page_dir)
+        vmm_switch_directory(next->page_dir);
+    else
+        vmm_set_kernel_dir();
+
     inside_timer_schedule = 0;
     return next->cpu.esp_;
-}
-
-void scheduler(void)
-{
-    return ;
-    if (!current_task)
-    {
-        if (!task_list)
-            return;
-        current_task = task_list;
-    }
-    
-    printf("Scheduler: ");
-    print_enabled_interrupts();
-    free_finished_tasks();
-
-    task_t *next = get_next_task();
-
-    if (next->pid == 0)
-    {
-        next = next->next;
-    }
-
-    while (next->state == TASK_WAITING)
-    {
-        next = next->next;
-        if (next->pid == 0)
-        {
-            next = next->next;
-        }
-    }
-
-    task_t *prev = current_task;
-    tss_set_stack(next->kernel_stack);
-
-    current_task = next;
-    if (next->state == TASK_READY)
-    {
-        next->state = TASK_RUNNING;
-    }
-    else if (next->state == TASK_RUNNING)
-    {
-        uint32_t *stack = (uint32_t*)next->cpu.esp_;
-        *--stack = (uint32_t)handle_signals;
-        next->cpu.esp_ = (uint32_t)stack;
-    }
-    // if (next->pid == 5)
-    //     while(1);
-    
-    // puts_color("Scheduler\n", current_task->pid); // easy way of seeing scheduler working.
-    // puts_color("Scheduler\n", LIGHT_MAGENTA);
-    set_active_env(next->env);
-    if (next->is_user)
-    {
-        // puts_color("Switching to user\n", LIGHT_MAGENTA);
-        switch_context_to_user(prev, next);
-    }
-    else
-        switch_context(prev, next);
-    // puts_color("Scheduler\n", RED);
-    /* think this should not be here maybe (?)*/
-    enable_interrupts();
-    outb(0x20, 0x20);
 }
 
 void add_new_task(task_t* new_task)
@@ -431,8 +408,7 @@ static void task_exit_task(task_t *task, int signal)
     enqueue(&finished_pid_queue, pid, signal);
     to_free = task;
 
-    if (current_task == task)
-        scheduler();
+    /* should we call scheduler()? */
 }
 
 static void task_exit_pid(pid_t task_id)
@@ -455,7 +431,7 @@ void _exit(int status)
 
 void kill_task(int signal)
 {
-    // printf("Killing task %d With signal:%d--------------\n", current_task->pid, signal);
+    // kprintf("Killing task %d With signal:%d--------------\n", current_task->pid, signal);
     task_exit_task(current_task, signal);
 }
 
@@ -684,7 +660,7 @@ pid_t _do_fork(const cpu_state_t *parent_state)
     init_signals(child);
 
     add_new_task(child);
-    // printf("Forked new task: child pid %d, parent pid %d\n", child->pid, parent->pid);
+    // kprintf("Forked new task: child pid %d, parent pid %d\n", child->pid, parent->pid);
     return child->pid;
 }
 
@@ -763,17 +739,16 @@ void task_1(void)
     kfree(user_buffer);
     // puts_color("test_mmap: mmap/munmap test passed\n", GREEN);
 
-    signal(2, task_1_sighandler);
+    sys_signal(2, task_1_sighandler);
 
     while (1)
     {
         int return_value;
-        return_value = write(3, "Task 1\n", 7);
+        return_value = sys_write(3, "Task 1\n", 7);
         if (return_value > 0) // it must fail so not failing it's indeed a fail
         {
             puts_color("Error writing\n", RED);
         }
-        scheduler();
     }
 }
 
@@ -793,8 +768,7 @@ void socket_1()
 
     while(1)
     {
-        write(sock, buffer, strlen(buffer));
-        scheduler();
+        sys_write(sock, buffer, strlen(buffer));
     }
 
 }
@@ -814,12 +788,12 @@ void socket_2()
         return;
     }
 
-    printf("sleeping for 5 seconds '%d'\n", get_kuptime());
-    sleep(5);
+    kprintf("sleeping for 5 seconds '%d'\n", get_kuptime());
+    sys_sleep(5);
 
     while(1)
     {
-        return_value = read(sock, buffer, sizeof(buffer));
+        return_value = sys_read(sock, buffer, sizeof(buffer));
         if (return_value < 0)
         {
             // enable_print();
@@ -831,8 +805,7 @@ void socket_2()
         //     puts_color(read_str, GREEN);
         //     puts_color(buffer, GREEN);
         // }
-        sleep(3);
-        scheduler();
+        sys_sleep(3);
     }
 
 }
@@ -841,8 +814,7 @@ void recursion()
 {
     static unsigned int i = 0;
     // puts("Recursion\n" );
-    printf("Recursion %d\n", i++);
-    scheduler();
+    kprintf("Recursion %d\n", i++);
     recursion();
 }
 
@@ -853,7 +825,7 @@ void test_recursion(void)
 
 void task_read()
 {
-    printf("Task 4 Started\n");
+    kprintf("Task 4 Started\n");
     int fd;
     char buffer[11];
     int return_value;
@@ -868,23 +840,23 @@ void task_read()
     char* fd_str = "fd: %d\n";
 
     fd_str = "fd: '%d'\n";
-    fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC);
+    fd = sys_open(filename, O_WRONLY | O_CREAT | O_TRUNC);
     if (fd < 0)
     {
         puts_color("Failed to open /boot/task_read\n", RED);
         return;
     }
 
-    printf(fd_str, fd);
+    kprintf(fd_str, fd);
 
-    write(fd, buffer, 10);
-    close(fd);
+    sys_write(fd, buffer, 10);
+    sys_close(fd);
 
     memset(buffer, 0, sizeof(buffer));
     // while (1)
     // {
         // fd = open("/boot/task_read", O_RDONLY);
-        // printf("fd------: %d\n", fd);
+        // kprintf("fd------: %d\n", fd);
         // if (fd < 0)
         // {
         //     puts_color("Failed to open /boot/task_read\n", RED);
@@ -894,13 +866,13 @@ void task_read()
 
     while (1)
     {
-        fd = open(filename, O_RDONLY);
+        fd = sys_open(filename, O_RDONLY);
         if (fd < 0)
         {
             puts_color("Failed to open /boot/task_read\n", RED);
             return;
         }
-        return_value = read(fd, buffer, sizeof(buffer));
+        return_value = sys_read(fd, buffer, sizeof(buffer));
         // return_value = read(0, buffer, sizeof(buffer));
         // return_value = write(3, buffer, return_value); // error writing to fd 3
         if (return_value <= 0)
@@ -917,61 +889,53 @@ void task_read()
             // puts_color(read_str, GREEN);
             // puts_color(buffer, GREEN);
         }
-        close(fd);
-        yeld();
+        sys_close(fd);
     }
 
 }
 
+/* It needs to get a new page directory if i would want it to work again. */
 void create_user_code_task(char *name)
 {
-    // vmalloc garantiza alineación a página
     uint8_t *code_page = vmalloc(PAGE_SIZE);
     uint8_t *data_page = vmalloc(PAGE_SIZE);
 
-    // Guardar físicas ANTES de unmap
     uint32_t code_pa = vmm_get_physical(vmm_current_directory(), (uint32_t)code_page);
     uint32_t data_pa = vmm_get_physical(vmm_current_directory(), (uint32_t)data_page);
 
-    // Ahora sí están alineadas, remap con PAGE_USER_RW
     vmm_unmap_page(vmm_current_directory(), (uint32_t)code_page);
     vmm_unmap_page(vmm_current_directory(), (uint32_t)data_page);
     vmm_map_page(vmm_current_directory(), (uint32_t)code_page, code_pa, PAGE_USER_RW);
     vmm_map_page(vmm_current_directory(), (uint32_t)data_page, data_pa, PAGE_USER_RW);
 
-    // Después del remap, verificar flags
     uint32_t *dir_entries = (uint32_t *)vmm_current_directory();
     uint32_t dir_idx = (uint32_t)code_page >> 22;
     uint32_t tbl_phys = dir_entries[dir_idx] & 0xFFFFF000;
     uint32_t *tbl = (uint32_t *)tbl_phys;
     uint32_t tbl_idx = ((uint32_t)code_page >> 12) & 0x3FF;
     uint32_t pde_flags = dir_entries[dir_idx] & 0xFFF;
-    printf("PDE flags for code_page: %x\n", pde_flags);
-    printf("PTE flags for code_page: %x\n", tbl[tbl_idx] & 0xFFF);
-    // printf("PTE flags for code_page: 0x%x\n", tbl[tbl_idx] & 0xFFF);
-    // Debe ser 0x7 (PRESENT | RW | USER)
+    kprintf("PDE flags for code_page: %x\n", pde_flags);
+    kprintf("PTE flags for code_page: %x\n", tbl[tbl_idx] & 0xFFF);
 
-    // Copiar datos y código
     memcpy(data_page, user_msg, sizeof(user_msg));
     memcpy(code_page, user_code, sizeof(user_code));
 
 
-    printf("code bytes at %p: ", code_page);
+    kprintf("code bytes at %p: ", code_page);
     for (int i = 0; i < 10; i++)
     {
         put_2_hex(code_page[i]);
         putc(' ');
     }
-    printf("\n");
-    // Parchear dirección del buffer en el mov ecx
+    kprintf("\n");
     *(uint32_t *)(code_page + 11) = (uint32_t)data_page;
 
-    printf("ecx patch at offset 11: %x\n", *(uint32_t*)(code_page + 11));
+    kprintf("ecx patch at offset 11: %x\n", *(uint32_t*)(code_page + 11));
 
-    create_user_task_at((uint32_t)code_page, name, NULL);
+    create_user_task_at((uint32_t)code_page, name, NULL, NULL);
 }
 
-void create_user_task_at(uint32_t entry_addr, char *name, void (*on_exit)(void))
+void create_user_task_at(uint32_t entry_addr, char *name, void (*on_exit)(void), page_directory_t* _task_dir)
 {
     task_t *task = kmalloc(sizeof(task_t));
     memset(task, 0, sizeof(task_t));
@@ -979,31 +943,31 @@ void create_user_task_at(uint32_t entry_addr, char *name, void (*on_exit)(void))
     uint32_t *kernel_stack_base = kmalloc(STACK_SIZE);
     uint32_t *kernel_stack_top  = kernel_stack_base + STACK_SIZE / sizeof(uint32_t);
 
-    uint32_t ks_pa = vmm_get_physical(vmm_current_directory(), 
-                        (uint32_t)kernel_stack_top & 0xFFFFF000);
-    printf("kernel_stack_top=%x pa=%x\n", (uint32_t)kernel_stack_top, ks_pa);
+    task->page_dir = _task_dir;
 
-    uint32_t test_addr = (uint32_t)kernel_stack_top - 4;
-    uint32_t test_pa = vmm_get_physical(vmm_current_directory(), test_addr & 0xFFFFF000);
-    printf("kernel stack page pa=%x\n", test_pa);
+    page_directory_t *task_dir;
+    if (_task_dir)
+        task_dir = _task_dir;
+    else
+        task_dir = vmm_current_directory();
 
     uint32_t *user_stack_base = vmalloc(USER_STACK_SIZE);
     uint32_t user_pages = PAGE_ALIGN(USER_STACK_SIZE) / PAGE_SIZE;
     for (uint32_t i = 0; i < user_pages; i++)
     {
         uint32_t va = (uint32_t)user_stack_base + i * PAGE_SIZE;
-        uint32_t pa = vmm_get_physical(vmm_current_directory(), va);
-        vmm_unmap_page(vmm_current_directory(), va);
-        vmm_map_page(vmm_current_directory(), va, pa, PAGE_USER_RW);
+        uint32_t pa = vmm_get_physical(task_dir, va);
+        vmm_unmap_page(task_dir, va);
+        vmm_map_page(task_dir, va, pa, PAGE_USER_RW);
     }
 
     /* Create exit stub for enforcing all programs to exit cleanly */
     uint8_t *stub_page = vmalloc(PAGE_SIZE);
-    uint32_t stub_pa = vmm_get_physical(vmm_current_directory(), (uint32_t)stub_page);
-    vmm_unmap_page(vmm_current_directory(), (uint32_t)stub_page);
-    vmm_map_page(vmm_current_directory(), (uint32_t)stub_page, stub_pa, PAGE_USER_RW);
+    uint32_t stub_pa = vmm_get_physical(task_dir, (uint32_t)stub_page);
+    vmm_unmap_page(task_dir, (uint32_t)stub_page);
+    vmm_map_page(task_dir, (uint32_t)stub_page, stub_pa, PAGE_USER_RW);
 
-    uint32_t *dir = (uint32_t*)vmm_current_directory();
+    uint32_t *dir = (uint32_t*)task_dir;
     dir[(uint32_t)stub_page >> 22] |= PAGE_USER;
     __asm__ __volatile__("invlpg (%0)" : : "r"((uint32_t)stub_page) : "memory");
 
@@ -1045,7 +1009,7 @@ void create_user_task_at(uint32_t entry_addr, char *name, void (*on_exit)(void))
 
 void task_wait()
 {
-    // printf("Task 5 Started\n");
+    // kprintf("Task 5 Started\n");
     pid_t pid;
     int status;
     while (1)
@@ -1053,38 +1017,18 @@ void task_wait()
         pid = _wait(&status);
         (void)pid;
         set_putchar_color(GREEN);
-        // printf("Task 5: Child %d exited with status %d\n", pid, status);
+        // kprintf("Task 5: Child %d exited with status %d\n", pid, status);
         set_putchar_color(LIGHT_GREY);
  
         // puts("Task 5\n");
-        scheduler();
     }
 }
-
-void user_task()
-{
-
-    // while(1);
-
-    while(1)
-    {
-        write(3, "User task\n", 10);
-        yeld();
-    }
-}
-
-#include "../user/ushell/ushell.h"
 
 void unsleep_kshell()
 {
     /* Assuming kshell it's allways 1. */
     task_t *kshell = get_task_by_pid(1);
     kshell->state = TASK_READY;
-}
-
-void start_user()
-{
-    create_task(ushell, "ushell", unsleep_kshell);
 }
 
 void kshell();
@@ -1097,11 +1041,14 @@ void start_foo_tasks(void)
     create_task(task_read, "task_read", NULL);
     create_task(socket_1, "socket_1", NULL);
     create_task(socket_2, "socket_2", NULL);
-    create_user_code_task("user_code_task");
+    // create_user_code_task("user_code_task");
     exec_bin("/hello");
+    exec_bin("/hello2");
+    exec_bin("/ushell");
+    insmod("/kb_mod.o");
 
     to_free = NULL;
-    // printf("current_task: %p\n", current_task);
+    // kprintf("current_task: %p\n", current_task);
 }
 
 /* ################################################################### */
@@ -1112,11 +1059,11 @@ void show_tasks()
     task_t *current = task_list;
     do
     {
-        printf("Task '%s'\n", current->name);
-        printf("  PID: %d\n", current->pid);
-        printf("  ESP: %p\n", current->cpu.esp_);
-        printf("  EIP: %p\n", current->cpu.eip);
-        printf("  State: %d\n", current->state);
+        kprintf("Task '%s'\n", current->name);
+        kprintf("  PID: %d\n", current->pid);
+        kprintf("  ESP: %p\n", current->cpu.esp_);
+        kprintf("  EIP: %p\n", current->cpu.eip);
+        kprintf("  State: %d\n", current->state);
         current = current->next;
     } while (current != task_list);
 }
