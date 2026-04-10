@@ -83,12 +83,11 @@ void exec_builtin(char** argv, int argc)
         // }
         i++;
     }
-
-    // kprintf("Command '%s' not found\n", argv[0]);
+    // printf("Command '%s' not found\n", argv[0]);
 }
 
 // void main(int argc, char** argv, char** envp)
-void _start()
+void main()
 {
     char* buffer;
     char* tokens[MAX_TOKENS];
@@ -104,24 +103,21 @@ void _start()
     user_cmds[SLEEP].handler = u_sleep;
     user_cmds[TIME].handler = u_time;
 
-
-
     get_pid();
-    // kprintf("Welcome to ushell\n");
+
     // print_env(); /* DEBUG */
     i = 0;
     // while (envp[i] != NULL)
     // {
-    //     // kprintf("%s\n", envp[i]);
+    //     // printf("%s\n", envp[i]);
     //     i++;
     // }
-    // exit(0);
 
     while (1)
     {
-        buffer = readline(NULL);
-        if (!buffer)
-            continue;
+        // buffer = readline(NULL);
+        // if (!buffer)
+        //     continue;
 
         token_count = 0;
 
@@ -187,7 +183,6 @@ void u_sleep(char** argv, int argc)
 {
     if (argc < 2)
     {
-        // kprintf("Invalid number of arguments for sleep\n");
         return;
     }
 
@@ -211,5 +206,5 @@ void u_time(char** argv, int argc)
     (void)argc;
     time_t t;
     time(&t);
-    // kprintf("Current time: %d\n", t);
+    // printf("Current time: %d\n", t);
 }

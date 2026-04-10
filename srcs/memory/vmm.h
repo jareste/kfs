@@ -141,6 +141,9 @@ page_directory_t* vmm_current_directory(void);
 
 page_directory_t* vmm_clone_directory(page_directory_t *src);
 
+
+page_directory_t* vmm_clone_directory(page_directory_t *src);
+
 /*
  * vmm_alloc_page - allocate a physical frame and map it at @virt.
  *
