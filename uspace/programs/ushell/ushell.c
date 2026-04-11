@@ -105,6 +105,7 @@ void main()
 
     get_pid();
 
+    return;
     // print_env(); /* DEBUG */
     i = 0;
     // while (envp[i] != NULL)

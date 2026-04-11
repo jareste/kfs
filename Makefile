@@ -139,19 +139,19 @@ format: crdisk
 	sudo cp hello124.txt mnt_ext2/
 	# sudo mkdir mnt_ext2/etc
 	# sudo cp users.config mnt_ext2/etc/.
-# 	sudo gcc -m32 -nostdlib -static -o mnt_ext2/hello test/hello.c
 	sudo gcc -m32 -static -nostdlib -nostartfiles -ffreestanding -fno-pic -fno-pie -Wl,--build-id=none -o hello test/hello.c
 	sudo gcc -m32 -static -nostdlib -nostartfiles -ffreestanding -fno-pic -fno-pie -Wl,--build-id=none -o hello2 test/hello2.c uspace/stdlib/libkfs_stdlib.a
 	sudo cp hello mnt_ext2/.
 	sudo cp hello2 mnt_ext2/.
-	sudo cp ushell mnt_ext2/.
+	sudo make -C uspace/programs/ushell
+	sudo cp uspace/programs/ushell/ushell mnt_ext2/.
 	sudo gcc -m32 -c -ffreestanding -fno-builtin -fno-pic -fno-pie -fno-stack-protector -nostdlib -O0  uspace/modules/kb_mod.c -o kb_mod.o
 	sudo cp kb_mod.o mnt_ext2/.
 	sudo cp users.config mnt_ext2/.
 	sudo rm -rf lost+found
 	sudo umount mnt_ext2
 	rm -rf mnt_ext2
-# sudo ./ext2_format disk.img users.config hello124.txt
+	rm -rf hello hello2 ushell kb_mod.o
 	rm ext2_format users.config hello124.txt
 
 .PHONY: all clean fclean re run xorriso release run_release run_grub debug build_iso
