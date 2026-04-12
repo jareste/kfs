@@ -2,6 +2,7 @@
 #include "../utils/stdint.h"
 #include "../display/display.h"
 #include "../tasks/task.h"
+#include "../tasks/elf.h"
 #include "../keyboard/signals.h"
 #include "../keyboard/keyboard.h"
 #include "../time/time.h"
@@ -126,6 +127,21 @@ time_t sys_time(time_t* tloc)
     return _time(tloc);
 }
 
+int sys_execve(const char* path, char* const argv[], char* const envp[])
+{
+    int ret;
+    (void)argv;
+    (void)envp;
+    ret = exec_bin(path);
+    if (ret < 0)
+    {
+        kprintf("Failed to execute binary: %s\n", path);
+        return -1;
+    }
+    _exit(0); /* should never return */
+    return 0;
+}
+
 syscall_entry_t syscall_table[SYS_MAX_SYSCALL];
 
 int syscall_handler(registers reg)
@@ -242,6 +258,12 @@ void init_syscalls()
         .ret_value_entry = RET_INT,
         .num_args = 0,
         .handler.handler = (void*)sys_fork,
+    };
+
+    syscall_table[SYS_EXECVE] = (syscall_entry_t){
+        .ret_value_entry = RET_INT,
+        .num_args = 3,
+        .handler.handler = (void*)sys_execve,
     };
 
     // syscall_table[SYS_GETTIMEOFDAY] = (syscall_entry_t){

@@ -45,6 +45,5 @@ module_t time_module = {
 
 void register_time_module()
 {
-    return;
     register_module(&time_module);
 }

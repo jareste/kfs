@@ -201,3 +201,68 @@ void module_free(void *ptr)
     /* In a simple ring allocator, free is not implemented.
        A real implementation would require a more sophisticated scheme. */
 }
+
+/* cli commands */
+#include "../kshell/kshell.h"
+
+void rmmod();
+void install_module();
+void list_modules_cmd();
+command_t m_commands[] = {
+    {"list", "List registered modules", list_modules_cmd},
+    {"insmod", "Install a module from a file", install_module},
+    {"rmmod", "Remove a module by name", rmmod},
+    {NULL, NULL, NULL}
+};
+
+void install_module_commands()
+{
+    install_all_cmds(m_commands, MODULES);
+}
+
+
+void list_modules_cmd()
+{
+    module_node_t *n;
+    kprintf("Registered modules:\n");
+    for (n = module_list; n; n = n->next)
+    {
+        kprintf("  ID: %d, Name: %s, Flags: %x\n",
+                n->module->module_id, n->module->name, n->module->flags);
+    }
+}
+
+void insmod(const char *path);
+void install_module()
+{
+    int i;
+    char* buffer;
+    uint32_t section;
+
+    puts("Enter the path: ");
+    buffer = get_line();
+    insmod(buffer);
+}
+
+void rmmod()
+{
+    int i;
+    char* buffer;
+    uint32_t section;
+
+    puts("Enter the module name: ");
+    buffer = get_line();
+    module_t* mod = get_module_by_name(buffer);
+    if (!mod)
+    {
+        kprintf("rmmod: module '%s' not found\n", buffer);
+        return;
+    }
+    if (unregister_module(mod) < 0)
+    {
+        kprintf("rmmod: failed to unregister module '%s'\n", buffer);
+        return;
+    }
+    kprintf("Module '%s' unregistered successfully\n", buffer);
+}
+

@@ -82,9 +82,10 @@ static uint32_t elf_load(uint8_t* binary)
     return ehdr->e_entry;
 }
 
-void exec_bin(const char* path)
+int exec_bin(const char* path)
 {
-    page_directory_t *task_dir;
+    page_directory_t* task_dir;
+    page_directory_t* prev_dir;
     uint32_t entry;
     ssize_t file_size;
     uint8_t *binary;
@@ -94,14 +95,14 @@ void exec_bin(const char* path)
     if (fd < 0)
     {
         puts_color("Failed to open binary\n", RED);
-        return;
+        return -1;
     }
     file_size = sys_lseek(fd, 0, SEEK_END);
     if (file_size < 0)
     {
         puts_color("Failed to get file size\n", RED);
         sys_close(fd);
-        return;
+        return -1;
     }
     sys_lseek(fd, 0, SEEK_SET);
     binary = kmalloc(file_size);
@@ -110,12 +111,13 @@ void exec_bin(const char* path)
         puts_color("Failed to read binary\n", RED);
         kfree(binary);
         sys_close(fd);
-        return;
+        return -1;
     }
     sys_close(fd);
 
     pause_scheduler(1); /* prevent context switch that would ruin this logic. */
-    task_dir = vmm_clone_directory(vmm_current_directory());
+    prev_dir = vmm_current_directory();
+    task_dir = vmm_clone_directory(prev_dir);
 
     /* Change context to properly be able to create a task */
     vmm_switch_directory(task_dir);
@@ -125,16 +127,16 @@ void exec_bin(const char* path)
     {
         puts_color("ELF load failed\n", RED);
         kfree(binary);
-        return;
+        return -1;
     }
 
     create_user_task_at(entry, path, NULL, task_dir);
 
-    vmm_set_kernel_dir();
+    vmm_switch_directory(prev_dir);
 
     pause_scheduler(0); /* re-enable scheduling */
 
     kfree(binary);
 
-    return;
+    return 0;
 }

@@ -12,7 +12,7 @@ vpath %.c $(SRC_DIR)
 vpath %.asm $(SRC_DIR)
 
 FILES_ASM = close exit fork get_pid kill open read signal sleep \
-			time usleep write
+			time usleep write execve
 FILES_C = 
 
 SRCS_ASM = $(addsuffix .asm, $(FILES_ASM))
@@ -30,11 +30,11 @@ all: .gitignore $(NAME)
 $(NAME): $(OBJS)
 	ar rcs $(NAME) $(OBJS)
 
-$(OBJ_DIR)/%.o: %.c
+$(OBJ_DIR)/%.o: %.c kfs_stdlib.h
 	@mkdir -p $(@D)
 	$(CC) -MMD $(CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/%.o: %.asm
+$(OBJ_DIR)/%.o: %.asm kfs_stdlib.h
 	@mkdir -p $(@D)
 	$(AS) $(ASMFLAGS) -o $@ $<
 

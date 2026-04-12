@@ -39,7 +39,8 @@ C_SOURCES = kernel.c strcmp.c strlen.c kprintf.c putc.c puts.c keyboard.c \
 			strcpy.c users_api.c strncpy.c strncat.c strrchr.c \
 			strtok.c strcspn.c strspn.c strcat.c env.c \
 			strchr.c memmove.c uitoa.c vstrdup.c kstrdup.c sock_registers.c \
-			tty.c modules.c mod_keyboard.c mod_time.c elf_loader.c elf_module.c
+			tty.c modules.c mod_keyboard.c mod_time.c elf_loader.c elf_module.c \
+			task_offsets.c
 
 ASM_SOURCES = boot.asm handler.asm gdt_asm.asm dump_registers.asm \
 			  clear_registers.asm tasks.asm
@@ -139,6 +140,7 @@ format: crdisk
 	sudo cp hello124.txt mnt_ext2/
 	# sudo mkdir mnt_ext2/etc
 	# sudo cp users.config mnt_ext2/etc/.
+	sudo make -C uspace/stdlib
 	sudo gcc -m32 -static -nostdlib -nostartfiles -ffreestanding -fno-pic -fno-pie -Wl,--build-id=none -o hello test/hello.c
 	sudo gcc -m32 -static -nostdlib -nostartfiles -ffreestanding -fno-pic -fno-pie -Wl,--build-id=none -o hello2 test/hello2.c uspace/stdlib/libkfs_stdlib.a
 	sudo cp hello mnt_ext2/.

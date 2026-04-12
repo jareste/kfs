@@ -51,7 +51,6 @@ module_t keyboard_module = {
 
 void register_keyboard_module()
 {
-    return;
     register_module(&keyboard_module);
 }
 

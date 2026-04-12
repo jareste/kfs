@@ -80,7 +80,7 @@ static uint8_t exit_stub[] =
 
 static uint32_t *saved_kernel_esp = NULL;
 static uint32_t m_let_scheduler_run = 0;
-static task_t* current_task = NULL;
+task_t* current_task = NULL;
 static task_t* task_list = NULL;
 static task_t* to_free = NULL;
 static pid_t task_index = 0;
@@ -282,7 +282,7 @@ void check_wake_up(task_t* task)
 //     return current;
 // }
 
-static task_t* get_next_task(void)
+task_t* get_next_task(void)
 {
     task_t *start   = current_task->next;
     task_t *current = start;
@@ -291,10 +291,7 @@ static task_t* get_next_task(void)
     {
         check_wake_up(current);
         if (current->pid != 0 &&
-            current->state != TASK_WAITING &&
-            current->state != TASK_SLEEPING &&
-            current->state != TASK_ZOMBIE &&
-            current->state != TASK_TO_DIE)
+            ((current->state == TASK_READY)  || (current->state == TASK_RUNNING)))
             return current;
         current = current->next;
     } while (current != start);
@@ -316,7 +313,7 @@ void pause_scheduler(int pause)
         prev_value = m_let_scheduler_run;
         m_let_scheduler_run = 0;
     }
-    else
+    else if (pause == 0 && prev_value != 0)
     {
         m_let_scheduler_run = prev_value;
         prev_value = 0;
@@ -406,6 +403,11 @@ static void task_exit_task(task_t *task, int signal)
     pid_t pid = task->pid;
     task->state = TASK_ZOMBIE;
     enqueue(&finished_pid_queue, pid, signal);
+    if (to_free)
+    {
+        /* If there's already a task waiting to be freed, free it now */
+        free_finished_tasks();
+    }
     to_free = task;
 
     /* should we call scheduler()? */
@@ -1032,10 +1034,12 @@ void unsleep_kshell()
 }
 
 void kshell();
-
+void ide_task_main(void);
 void start_foo_tasks(void)
 {
     create_task(kshell, "kshell", NULL);
+    create_task(ide_task_main, "ide", NULL);
+
     create_task(task_wait, "task_wait", NULL);
     create_task(task_1, "task_1", task_1_exit);
     create_task(task_read, "task_read", NULL);
@@ -1043,6 +1047,10 @@ void start_foo_tasks(void)
     create_task(socket_2, "socket_2", NULL);
     // create_user_code_task("user_code_task");
     exec_bin("/hello");
+    exec_bin("/hello");
+    exec_bin("/hello2");
+    exec_bin("/hello2");
+    exec_bin("/hello2");
     exec_bin("/hello2");
     exec_bin("/ushell");
     insmod("/kb_mod.o");

@@ -2,7 +2,9 @@
 #define STDLIB_H
 #include "../../srcs/utils/stdint.h" /* Take same stdint as kernel has to avoid conflicts. */
 
+#ifndef NULL
 #define NULL (void*)0
+#endif
 
 typedef void (*signal_handler_t)(int);
 
@@ -17,5 +19,6 @@ int close(int fd);
 void sleep(uint32_t seconds);
 void usleep(uint32_t microseconds);
 time_t time(time_t* tloc);
+int execve(const char* path, char* const argv[], char* const envp[]);
 
 #endif

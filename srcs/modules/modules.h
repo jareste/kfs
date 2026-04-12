@@ -27,6 +27,28 @@ typedef void (*module_exit_fn_t)(void);
     __attribute__((__section__(".mod_info_flags"))) \
     __attribute__((__used__)) = f
 
+/* https://man7.org/linux/man-pages/man2/init_module.2.html */
+struct module
+{
+    unsigned long         size_of_struct;
+    struct module        *next;
+    const char           *name;
+    unsigned long         size;
+    long                  usecount;
+    unsigned long         flags;
+    unsigned int          nsyms;
+    unsigned int          ndeps;
+    struct module_symbol *syms;
+    struct module_ref    *deps;
+    struct module_ref    *refs;
+    typeof(int (void))   *init;
+    typeof(void (void))  *cleanup;
+    const struct exception_table_entry *ex_table_start;
+    const struct exception_table_entry *ex_table_end;
+#ifdef __alpha__
+    unsigned long gp;
+#endif
+};
 
 /* Flags to indicate which events a module cares about */
 typedef enum
@@ -40,7 +62,7 @@ typedef enum
 struct time_info;
 
 /* Module interface structure */
-typedef struct module
+typedef struct
 {
     int module_id; /* must be overwritten by the kernel whatever the user introduced here */
     const char *name;

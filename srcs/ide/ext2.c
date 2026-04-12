@@ -87,7 +87,8 @@ static void ext2_read_inode(uint32_t inode_num, struct ext2_inode *inode)
     kfree(block);
 }
 
-static void ext2_write_inode(uint32_t inode_num, struct ext2_inode *inode) {
+static void ext2_write_inode(uint32_t inode_num, struct ext2_inode *inode)
+{
     uint32_t index = inode_num - 1;
     uint32_t block_offset = (index * EXT2_INODE_SIZE) / EXT2_BLOCK_SIZE;
     uint32_t offset_in_block = (index * EXT2_INODE_SIZE) % EXT2_BLOCK_SIZE;

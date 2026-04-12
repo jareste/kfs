@@ -127,6 +127,7 @@ static void init_section(const char* name, section_t section)
     sizeof(command_sections[section].commands));
 }
 
+void install_module_commands();
 void init_kshell()
 {
     init_section("global", GLOBAL);
@@ -134,6 +135,7 @@ void init_kshell()
     init_section("memory", MEMORY);
     init_section("debug", DEBUG);
     init_section("tasks", TASKS);
+    init_section("modules", MODULES);
 
     current_section = GLOBAL;
 
@@ -141,6 +143,7 @@ void init_kshell()
     install_all_cmds(in_commands, GENERAL);
     install_all_cmds(dcommand, DEBUG);
     install_all_cmds(tcommand, TASKS);
+    install_module_commands();
 }
 
 static void kuptime()

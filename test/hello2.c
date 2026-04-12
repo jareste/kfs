@@ -2,6 +2,7 @@
 void _start() {
     const char msg[] = "Hello2222 World\n";
     write(1, msg, sizeof(msg) - 1);
+    execve("/hello", NULL, NULL);
     get_pid();
     exit(0);
 }
