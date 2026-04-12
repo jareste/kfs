@@ -182,7 +182,33 @@ page_directory_t* vmm_clone_directory(page_directory_t *src)
         uint32_t virt_start = i * 4 * 1024 * 1024;
 
         if (virt_start >= 0x08000000 && virt_start < 0x0C000000)
+        {
+            uint32_t new_table_phys = pmm_alloc_frame();
+            page_table_t *new_table = (page_table_t*)new_table_phys;
+            page_table_t *src_table = (page_table_t*)(src->entries[i] & PAGE_FRAME_MASK);
+
+            for (int j = 0; j < 1024; j++)
+            {
+                if (!(src_table->entries[j] & PAGE_PRESENT))
+                {
+                    new_table->entries[j] = 0;
+                    continue;
+                }
+
+                uint32_t new_frame = pmm_alloc_frame();
+                uint32_t old_frame = src_table->entries[j] & PAGE_FRAME_MASK;
+                uint32_t flags     = src_table->entries[j] & 0xFFF;
+
+                memcpy((void*)new_frame, (void*)old_frame, PAGE_SIZE);
+
+                new_table->entries[j] = new_frame | flags;
+            }
+
+            uint32_t dir_flags = src->entries[i] & 0xFFF;
+            dir->entries[i] = new_table_phys | dir_flags;
+
             continue;
+        }
 
         dir->entries[i] = src->entries[i];
     }

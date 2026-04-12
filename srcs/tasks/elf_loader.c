@@ -101,7 +101,7 @@ int exec_bin(const char* path)
     if (file_size < 0)
     {
         puts_color("Failed to get file size\n", RED);
-        sys_close(fd);
+        sys_close(fd, get_current_task());
         return -1;
     }
     sys_lseek(fd, 0, SEEK_SET);
@@ -110,10 +110,10 @@ int exec_bin(const char* path)
     {
         puts_color("Failed to read binary\n", RED);
         kfree(binary);
-        sys_close(fd);
+        sys_close(fd, get_current_task());
         return -1;
     }
-    sys_close(fd);
+    sys_close(fd, get_current_task());
 
     pause_scheduler(1); /* prevent context switch that would ruin this logic. */
     prev_dir = vmm_current_directory();

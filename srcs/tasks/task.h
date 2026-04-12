@@ -28,7 +28,7 @@ typedef struct child_list
 typedef struct task_struct
 {
     cpu_state_t cpu;
-    uint32_t cpu_esp_;    // you might keep cpu state in a struct
+    uint32_t cpu_esp_;
     uint32_t pid;
     uintptr_t kernel_stack; // Kernel Stack (for syscalls)
     uintptr_t kernel_stack_base; // Base of the kernel stack (for freeing)

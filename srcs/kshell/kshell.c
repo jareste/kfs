@@ -516,7 +516,7 @@ static void ks_read_mod_kb()
         if (n == 0)
             break;
     }
-    sys_close(fd);
+    sys_close(fd, get_current_task());
 }
 
 static void ks_unreg_mod_kb()

@@ -89,7 +89,7 @@ int _sys_open(const char* path, int flags)
 int _sys_close(int fd)
 {
     // kprintf("Syscall: close(%d)\n", fd);
-    return sys_close(fd);
+    return sys_close(fd, get_current_task());
 }
 
 int sys_get_pid()
@@ -132,12 +132,15 @@ int sys_execve(const char* path, char* const argv[], char* const envp[])
     int ret;
     (void)argv;
     (void)envp;
-    ret = exec_bin(path);
+    char* _path = kstrdup(path);
+    ret = exec_bin(_path);
     if (ret < 0)
     {
-        kprintf("Failed to execute binary: %s\n", path);
+        kprintf("Failed to execute binary: %s\n", _path);
+        kfree(_path);
         return -1;
     }
+    kfree(_path);
     _exit(0); /* should never return */
     return 0;
 }

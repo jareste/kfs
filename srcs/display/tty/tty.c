@@ -169,13 +169,19 @@ int tty_write(void *fp, const char *buf, size_t count)
 int tty_close(void *fp)
 {
     tty_device_t *tty = (tty_device_t *)fp;
+    tty->ref_count--;
 
-    kfree(tty);
+    if (tty->ref_count == 0)
+        kfree(tty);
+
     return 0;
 }
 
 int open_tty_device(void *tty_device, file_t* f)
 {
+    tty_device_t *tty = (tty_device_t *)tty_device;
+    tty->ref_count++;
+
     f->fops.write = tty_write;
     f->fops.read = tty_read;
     f->fops.close = tty_close;

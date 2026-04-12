@@ -133,10 +133,15 @@ void close_all_fds(task_t* task)
 {
     for (int i = 0; i < MAX_FDS; i++)
     {
-        if (task->fd_table[i] == true)
-        {
-            sys_close(i);
-        }
+        if (!task->fd_table[i])
+            continue;
+
+        file_t *f = &task->fd_pointers[i];
+        if (f->fops.close && f->fp)
+            f->fops.close(f->fp);
+
+        f->fp = NULL;
+        task->fd_table[i] = false;
     }
 }
 
@@ -462,6 +467,8 @@ void add_child(task_t* parent, task_t* child)
 void init_standard_fds(task_t *task)
 {
     tty_device_t* tty_device = kmalloc(sizeof(tty_device_t));
+    memset(tty_device, 0, sizeof(tty_device_t));
+
     task->fd_table[0] = true;
     open_tty_device(tty_device, &task->fd_pointers[0]);
     
@@ -852,7 +859,7 @@ void task_read()
     kprintf(fd_str, fd);
 
     sys_write(fd, buffer, 10);
-    sys_close(fd);
+    sys_close(fd, get_current_task());
 
     memset(buffer, 0, sizeof(buffer));
     // while (1)
@@ -891,7 +898,7 @@ void task_read()
             // puts_color(read_str, GREEN);
             // puts_color(buffer, GREEN);
         }
-        sys_close(fd);
+        sys_close(fd, get_current_task());
     }
 
 }

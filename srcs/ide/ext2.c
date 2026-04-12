@@ -856,17 +856,17 @@ int sys_open(const char *path, int flags)
     return fd;
 }
 
-int sys_close(int fd)
+int sys_close(int fd, task_t *task)
 {
-    task_t* current;
+    // task_t* current;
     file_t* file_obj;
     
-    current = get_current_task();
-    if (fd < 0 || fd >= MAX_FDS || current->fd_table[fd] == false)
+    // current = get_current_task();
+    if (fd < 0 || fd >= MAX_FDS || task->fd_table[fd] == false)
         return -1;
 
     /* Get pointer to the file object in the array */
-    file_obj = &current->fd_pointers[fd];
+    file_obj = &task->fd_pointers[fd];
     if (file_obj->ref_count > 1)
     {
         file_obj->ref_count--;
@@ -883,8 +883,8 @@ int sys_close(int fd)
     //     ext2_fclose(file_obj->fp);
     
     /* Mark slot as free and zero out the structure */
-    current->fd_table[fd] = false;
-    memset(&current->fd_pointers[fd], 0, sizeof(file_t));
+    task->fd_table[fd] = false;
+    memset(&task->fd_pointers[fd], 0, sizeof(file_t));
     return 0;
 }
 
@@ -1574,14 +1574,14 @@ static void cmd_tfds(void)
     if (n < 0)
     {
         kprintf("Failed to read /etc/users.config\n");
-        sys_close(fd);
+        sys_close(fd, get_current_task());
         return;
     }
 
     kprintf("Read %d bytes from /etc/users.config:\n", n);
     for (int i = 0; i < n; i++)
         putc(buf[i]);
-    sys_close(fd);
+    sys_close(fd, get_current_task());
 }
 
 static void cmd_tfdopen()
@@ -1599,7 +1599,7 @@ static void cmd_tfdopen()
     }
 
     sys_write(fd, msg, strlen(msg));
-    sys_close(fd);
+    sys_close(fd, get_current_task());
 
     kprintf("Wrote to hello.txt, fd %d\n", fd);
 
@@ -1617,11 +1617,11 @@ static void cmd_tfdopen()
     if (strcmp(buf, msg) != 0)
     {
         kprintf("Failed to read back what was written\n");
-        sys_close(fd);
+        sys_close(fd, get_current_task());
         return;
     }
     kprintf("Read %u bytes: %s\n", (unsigned)n, buf);
-    sys_close(fd);
+    sys_close(fd, get_current_task());
 }
 
 void create_unix_dirs()

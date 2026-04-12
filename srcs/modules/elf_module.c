@@ -195,7 +195,7 @@ void insmod(const char *path)
     if (file_size < 0)
     {
         puts_color("Failed to get file size\n", RED);
-        sys_close(fd);
+        sys_close(fd, get_current_task());
         return;
     }
     sys_lseek(fd, 0, SEEK_SET);
@@ -204,10 +204,10 @@ void insmod(const char *path)
     {
         puts_color("Failed to read binary\n", RED);
         kfree(binary);
-        sys_close(fd);
+        sys_close(fd, get_current_task());
         return;
     }
-    sys_close(fd);
+    sys_close(fd, get_current_task());
 
     mod = elf_load_module(binary);
     if (!mod)

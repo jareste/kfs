@@ -13,6 +13,7 @@ typedef struct
     uint32_t read_pos;
     uint32_t write_pos;
     bool ready;
+    int ref_count;
 } tty_device_t;
 
 void tty_delete_ch(tty_device_t *tty);
