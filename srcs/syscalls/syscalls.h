@@ -98,9 +98,12 @@ typedef enum {
     SYS_MMAP = 90,
     SYS_MUNMAP = 91,
     SYS_WAIT4 = 114,
-    // ... CUSTOM SYSCALLS
-    SYS_SCHED_YIELD = 158,
     // ...
+    SYS_INIT_MODULE = 128,
+    SYS_DELETE_MODULE = 129,
+    SYS_GET_KERNEL_SYMS = 130,
+    SYS_QUERY_MODULE = 131,
+    SYS_QUOTACTL = 132,
     SYS_GETTIMEOFDAY = 169,
     SYS_NANOSLEEP = 170,
     SYS_SLEEP = 171,
@@ -109,7 +112,24 @@ typedef enum {
 
 } syscalls_num;
 
-int syscall_handler(registers reg);
+typedef struct __attribute__((packed))
+{
+    uint32_t edi;
+    uint32_t esi;
+    uint32_t ebp;
+    uint32_t esp;
+    uint32_t ebx;
+    uint32_t edx;
+    uint32_t ecx;
+    uint32_t eax;
+    uint32_t eip;
+    uint32_t cs;
+    uint32_t eflags;
+    uint32_t esp_user;
+    uint32_t ss_user;
+}  iret_regs_t;
+
+int syscall_handler(iret_regs_t* reg);
 
 void init_syscalls();
 

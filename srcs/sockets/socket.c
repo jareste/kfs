@@ -89,7 +89,7 @@ int sys_socket(int domain, int type, int protocol)
     }
     if (fd == MAX_FDS)
     {
-        printf("sys_socket: too many open files\n");
+        kprintf("sys_socket: too many open files\n");
         return -1;
     }
     
@@ -120,7 +120,7 @@ int sys_bind(int sockfd, const char *address)
     file_t *file_obj = &current->fd_pointers[sockfd];
     if (file_obj->type != FD_SOCKET)
     {
-        printf("sys_bind: fd %d is not a socket\n", sockfd);
+        kprintf("sys_bind: fd %d is not a socket\n", sockfd);
         return -1;
     }
     
@@ -139,7 +139,7 @@ ssize_t sys_recv(int fd, void *buf, size_t count)
 
      file_obj = &current->fd_pointers[fd];
     if (file_obj->type != FD_SOCKET) {
-        printf("sys_recv: fd %d is not a socket\n", fd);
+        kprintf("sys_recv: fd %d is not a socket\n", fd);
         return -1;
     }
     return socket_recv(file_obj->fp, buf, count);
@@ -156,7 +156,7 @@ ssize_t sys_send(int fd, const void *buf, size_t count)
 
     file_obj = &current->fd_pointers[fd];
     if (file_obj->type != FD_SOCKET) {
-        printf("sys_send: fd %d is not a socket\n", fd);
+        kprintf("sys_send: fd %d is not a socket\n", fd);
         return -1;
     }
     return socket_send(file_obj->fp, buf, count);
@@ -168,7 +168,7 @@ int sys_connect(const char *address)
     socket_t *peer = registry_lookup(address);
     if (!peer)
     {
-        printf("sys_connect: address not found: %s\n", address);
+        kprintf("sys_connect: address not found: %s\n", address);
         return -1;
     }
 
@@ -181,7 +181,7 @@ int sys_connect(const char *address)
     }
     if (fd == MAX_FDS)
     {
-        printf("sys_connect: too many open files\n");
+        kprintf("sys_connect: too many open files\n");
         return -1;
     }
 
@@ -190,7 +190,7 @@ int sys_connect(const char *address)
 
     if (socket_connect(client_sock, peer) < 0)
     {
-        printf("sys_connect: failed to connect\n");
+        kprintf("sys_connect: failed to connect\n");
         kfree(client_sock);
         return -1;
     }

@@ -39,6 +39,15 @@ typedef struct __attribute__((packed)) error_state {
     uint32_t eflags;
 } error_state;
 
+typedef struct __attribute__((packed)) error_state_user {
+    uint32_t err_code;
+    uint32_t eip;
+    uint32_t cs;
+    uint32_t eflags;
+    uint32_t esp_user;
+    uint32_t ss_user;
+} error_state_user_t;
+
 extern idt_entry idt[256];
 extern idt_ptr idtp;
 

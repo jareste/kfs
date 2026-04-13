@@ -2,6 +2,7 @@
 #include "../utils/stdint.h"
 #include "../display/display.h"
 #include "../tasks/task.h"
+#include "../tasks/elf.h"
 #include "../keyboard/signals.h"
 #include "../keyboard/keyboard.h"
 #include "../time/time.h"
@@ -81,14 +82,14 @@ int _sys_read(int fd, char* buf, size_t count)
 
 int _sys_open(const char* path, int flags)
 {
-    // printf("Syscall: open(%s, %d)\n", path, flags);
+    // kprintf("Syscall: open(%s, %d)\n", path, flags);
     return sys_open(path, flags);
 }
 
 int _sys_close(int fd)
 {
-    // printf("Syscall: close(%d)\n", fd);
-    return sys_close(fd);
+    // kprintf("Syscall: close(%d)\n", fd);
+    return sys_close(fd, get_current_task());
 }
 
 int sys_get_pid()
@@ -106,9 +107,9 @@ int sys_signal(uint32_t pid, signal_handler_t hand)
     return _signal(pid, hand);
 }
 
-pid_t sys_fork()
+pid_t sys_fork(iret_regs_t* parent_frame)
 {
-    return _fork();
+    return _fork(parent_frame);
 }
 
 void sys_usleep(uint32_t microseconds)
@@ -126,33 +127,55 @@ time_t sys_time(time_t* tloc)
     return _time(tloc);
 }
 
+int sys_execve(const char* path, char* const argv[], char* const envp[])
+{
+    int ret;
+    (void)argv;
+    (void)envp;
+    char* _path = kstrdup(path);
+    ret = exec_bin(_path);
+    if (ret < 0)
+    {
+        kprintf("Failed to execute binary: %s\n", _path);
+        kfree(_path);
+        return -1;
+    }
+    kfree(_path);
+    _exit(0); /* should never return */
+    return 0;
+}
+
+pid_t sys_waitpid(pid_t pid, int *status, int options)
+{
+    return _waitpid(pid, status, options);
+}
+
 syscall_entry_t syscall_table[SYS_MAX_SYSCALL];
 
-int syscall_handler(registers reg)
+int syscall_handler(iret_regs_t* reg)
 {
-    uint32_t syscall_number = reg.eax;
-    uint32_t arg1 = reg.ebx;
-    uint32_t arg2 = reg.ecx;
-    uint32_t arg3 = reg.edx;
-    uint32_t arg4 = reg.esi;
-    uint32_t arg5 = reg.edi;
-    uint32_t arg6 = reg.ebp;
+    uint32_t syscall_number = reg->eax;
+    uint32_t arg1 = reg->ebx;
+    uint32_t arg2 = reg->ecx;
+    uint32_t arg3 = reg->edx;
+    uint32_t arg4 = reg->esi;
+    uint32_t arg5 = reg->edi;
+    uint32_t arg6 = reg->ebp;
+
+    if (syscall_number == SYS_FORK)
+    {
+        return sys_fork(reg);
+    }
 
     if (syscall_number >= SYS_MAX_SYSCALL || syscall_table[syscall_number].handler.handler == NULL)
     {
-        printf("Unknown syscall: %d\n", syscall_number);
+        kprintf("Unknown syscall: %d\n", syscall_number);
         return -1;
     }
-    
-    // while (syscall_happening)
-    // {
-    //     scheduler();
-    // }
-    // syscall_happening = true;
 
     syscall_entry_t entry = syscall_table[syscall_number];
 
-    // printf("Syscall: %d\n", syscall_number);
+    // kprintf("Syscall: %d\n", syscall_number);
     syscall_return_t ret_value;
     switch (entry.num_args)
     {
@@ -178,14 +201,11 @@ int syscall_handler(registers reg)
             ret_value.int_value = ((syscall_handler_6_t)entry.handler.handler)(arg1, arg2, arg3, arg4, arg5, arg6);
             break;
         default:
-            printf("Invalid number of arguments for syscall %d\n", syscall_number);
+            kprintf("Invalid number of arguments for syscall %d\n", syscall_number);
             ret_value.int_value = -1;
             break;
     }
 
-    scheduler();
-
-    // syscall_happening = false;
     return ret_value.int_value;
 }
 
@@ -247,16 +267,10 @@ void init_syscalls()
         .handler.handler = (void*)sys_kill,
     };
 
-    syscall_table[SYS_SCHED_YIELD] = (syscall_entry_t){
+    syscall_table[SYS_EXECVE] = (syscall_entry_t){
         .ret_value_entry = RET_INT,
-        .num_args = 0,
-        .handler.handler = (void*)scheduler,
-    };
-
-    syscall_table[SYS_FORK] = (syscall_entry_t){
-        .ret_value_entry = RET_INT,
-        .num_args = 0,
-        .handler.handler = (void*)sys_fork,
+        .num_args = 3,
+        .handler.handler = (void*)sys_execve,
     };
 
     // syscall_table[SYS_GETTIMEOFDAY] = (syscall_entry_t){

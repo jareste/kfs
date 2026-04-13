@@ -9,6 +9,34 @@
 #include "../syscalls/syscalls.h"
 #include "../tasks/task.h"
 #include "../ide/ide.h"
+#include "../panic/kpanic.h"
+
+#define PF_PRESENT  (1 << 0)
+#define PF_WRITE    (1 << 1)
+#define PF_USER     (1 << 2)
+#define PF_RESERVED (1 << 3)
+#define PF_IFETCH   (1 << 4)
+
+
+void print_enabled_interrupts_asm()
+{
+    uint32_t eflags;
+    __asm__ __volatile__("pushf; pop %0" : "=r"(eflags));
+    if (eflags & (1 << 9))
+        kprintf("Interrupts are enabled from asm\n");
+    else
+        kprintf("Interrupts are disabled from asm\n");
+}
+
+void print_enabled_interrupts()
+{
+    uint32_t eflags;
+    __asm__ __volatile__("pushf; pop %0" : "=r"(eflags));
+    if (eflags & (1 << 9))
+        kprintf("Interrupts are enabled\n");
+    else
+        kprintf("Interrupts are disabled\n");
+}
 
 void enable_interrupts(void)
 {
@@ -29,26 +57,56 @@ void page_fault_handler(registers* regs, error_state* stack)
     task_t *task = get_current_task();
     if (task)
     {
-        printf("Task(%d) '%s': ", task->pid, task->name);
+        kprintf("Task(%d) '%s': \n", task->pid, task->name);
     }
-    printf("Page fault at 0x");
+
+    kprintf("EIP=%x CS=%x fault_addr=%x err=%x\n",
+           stack->eip, stack->cs, faulting_address, stack->err_code);
+
+    if ((stack->cs & 0x3) == 3)
+    {
+        error_state_user_t *ustack = (error_state_user_t*)stack;
+        kprintf("EFLAGS=%x ESP_user=%x SS_user=%x\n",
+               ustack->eflags, ustack->esp_user, ustack->ss_user);
+    }
+
+    kprintf("EIP at fault: %x\n", stack->eip);
+    kprintf("ECX at fault: %x\n", regs->ecx);
+    kprintf("CS  at fault: %x\n", stack->cs);
+    kprintf("Page fault at 0x");
     put_hex(faulting_address);
     putc('\n');
-    printf("Error code: 0x");
+    kprintf("Error code: 0x");
     put_hex(stack->err_code);
     putc('\n');
 
-    printf("Error type: ");
-    if (!(stack->err_code & 0x1)) printf("Non-present page ");
-    if (stack->err_code & 0x2) printf("Write ");
-    else printf("Read ");
-    if (stack->err_code & 0x4) printf("User-mode\n");
-    else printf("Kernel-mode\n");
+    kprintf("Error type: ");
+    if (!(stack->err_code & PF_PRESENT))
+        kprintf("non-present page | ");
+    else
+        kprintf("protection violation | ");
 
-    printf("Kernel uptime: %d\n", get_kuptime());
+    if (stack->err_code & PF_WRITE)
+        kprintf("write access | ");
+    else
+        kprintf("read access | ");
+
+    if (stack->err_code & PF_USER)
+        kprintf("user mode");
+    else
+        kprintf("kernel mode");
+
+    if (stack->err_code & PF_RESERVED)
+        kprintf(" | reserved bit set");
+
+    if (stack->err_code & PF_IFETCH)
+        kprintf(" | instruction fetch");
 
 
-    printf("Killing task %d due to page fault.\n", task->pid);
+    kprintf("\nKernel uptime: %d\n", get_kuptime());
+
+
+    kprintf("Killing task %d due to page fault.\n", task->pid);
     _exit(-1);  // or call kill_task() as appropriate
 }
 /* PAGE FAULT HANDLER */
@@ -60,7 +118,7 @@ void isr_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_state
     UNUSED(err_code)
     UNUSED(intr_no)
 
-    // printf("Interrupt SW number: %d\n", intr_no);
+    // kprintf("Interrupt SW number: %d\n", intr_no);
 
     if (intr_no == 14 || intr_no == 13)
     {
@@ -89,14 +147,16 @@ void irq_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_state
     // if (timer_ticks % 200 == 0)
     // {
     //     timer_ticks = 0;
-    //     // printf("Switching tasks\n");
+    //     // kprintf("Switching tasks\n");
     // }
+
+    if(intr_no >= 8)
+        outb(0xA0, 0x20);
+	outb(PIC_EOI, PIC1_COMMAND);
 
     switch (intr_no)
     {
         case 0:
-            // scheduler();
-            // disable_interrupts();
             irq_handler_timer();
             break;
         case 1:
@@ -106,17 +166,11 @@ void irq_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_state
             ide_irq_handler();
             break;
         default:
-        printf("eax: %d\n", reg.eax);
-        printf("ebx: %d\n", reg.ebx);
-            printf("Interrupt HW number: %d\n", intr_no);
-            kernel_panic("Unknown interrupt");
+        kprintf("eax: %d\n", reg.eax);
+        kprintf("ebx: %d\n", reg.ebx);
+            kprintf("Interrupt HW number: %d\n", intr_no);
+            kpanic("Unknown interrupt", 1);
     }
-
-    // enable_interrupts();
-    // if (intr_no >= 8)
-    // puts("#######################################################");
-    if(intr_no >= 8) outb(0xA0, 0x20);
-	outb(PIC_EOI, PIC1_COMMAND);
 }
 
 void init_interrupts()
@@ -190,7 +244,7 @@ void init_interrupts()
     idt_set_gate(46, (uint32_t)irq_handler_14); /* Primary ATA Hard Disk */
     idt_set_gate(47, (uint32_t)irq_handler_15); /* Secondary ATA Hard Disk */
 
-    idt_set_gate(0x30, (uint32_t)syscall_handler_asm);
+    idt_set_gate_user(0x30, (uint32_t)syscall_handler_asm);
 
     register_idt();
     ide_init();

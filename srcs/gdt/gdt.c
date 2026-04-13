@@ -38,14 +38,13 @@ typedef struct __attribute__((packed)) tss_entry
 static tss_entry_t tss;
 
 extern void load_tss();
-#include "../memory/memory.h"
+#include "../memory/kmalloc.h"
 
 void tss_init()
 {
     memset(&tss, 0, sizeof(tss_entry_t));
     uint32_t *stack = kmalloc(KB(4));
-    stack += KB(4) / sizeof(uint32_t);
-    tss.esp0 = (uint32_t)stack & 0xFFFFFFF0;
+    tss.esp0 = ((uint32_t)stack + KB(4)) & 0xFFFFFFF0;
     tss.ss0 = 0x10;
     tss.iomap = sizeof(tss_entry_t);
     load_tss();
@@ -105,5 +104,4 @@ void gdt_init()
     gdt_set_entry(7, (uint32_t)&tss, sizeof(tss) - 1, 0x89, 0x40);
 
     register_gdt();
-    tss_init();
 }

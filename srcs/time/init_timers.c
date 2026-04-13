@@ -8,7 +8,7 @@
 #define PIT_CONTROL_PORT     0x43
 #define PIT_CHANNEL0_PORT    0x40
 #define PIT_BASE_FREQUENCY   1193182
-#define PIT_FREQUENCY        100
+#define PIT_FREQUENCY        1000
 #define PIC1_COMMAND         0x20
 #define PIC_EOI              0x20
 #define SECONDS_TO_TICKS(x)  ((x) * PIT_FREQUENCY)
@@ -118,7 +118,7 @@ void print_date()
 
     call_rtc(&full_year, &month, &day, &hour, &minute, &second);
 
-    printf("Current date: %d-%d-%d %d:%d:%d\n", full_year, month, day, hour, minute, second);
+    kprintf("Current date: %d-%d-%d %d:%d:%d\n", full_year, month, day, hour, minute, second);
     ts.tv_sec = rtc_to_epoch(full_year, month, day, hour, minute, second);
     ts.tv_nsec = 0;
     dispatch_time_request(&ts);

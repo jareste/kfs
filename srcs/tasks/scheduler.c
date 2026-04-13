@@ -1,19 +1,29 @@
 #include "task.h"
 #include "../memory/memory.h"
+#include "../memory/vmm.h"
 #include "../utils/utils.h"
 #include "../utils/stdint.h"
 #include "../display/display.h"
 #include "../keyboard/signals.h"
+#include "../keyboard/idt.h"
 #include "../gdt/gdt.h"
 #include "../kshell/kshell.h"
-#include "../user/syscalls/stdlib.h"
 #include "../utils/queue.h"
 #include "../sockets/socket.h"
 #include "../display/tty/tty.h"
 
 #define STACK_SIZE 4096
-#define MAX_ACTIVE_TASKS 15
+#define MAX_ACTIVE_TASKS 100
 #define USER_STACK_SIZE 4096
+
+typedef struct __attribute__((packed))
+{
+    uint32_t edi, esi, ebp, esp_dummy;
+    uint32_t ebx, edx, ecx, eax;
+    uint32_t eip;
+    uint32_t cs;
+    uint32_t eflags;
+} irq_frame_t;
 
 void kernel_main();
 void task_1(void);
@@ -24,10 +34,6 @@ extern void switch_context(task_t *prev, task_t *next);
 extern void switch_context_to_user(task_t *prev, task_t *next);
 extern void copy_context(task_t *prev, task_t *next);
 void show_tasks();
-
-/* ASM ones */
-extern void fork_trampoline(void);
-extern void capture_cpu_state(cpu_state_t *state);
 
 static command_t commands[] = {
     {"show", "Show active tasks", show_tasks},
@@ -42,21 +48,55 @@ static char* default_envp[] = {
     NULL
 };
 
-task_t* current_task = NULL;
-task_t* task_list = NULL;
-task_t* to_free = NULL;
-pid_t task_index = 0;
-Queue finished_pid_queue;
-
-void dtach_from_childs(task_t* task)
+static uint8_t user_code[] =
 {
-    child_list_t *current = task->children;
+    // write(1, msg, 10)
+    0xB8, 0x04, 0x00, 0x00, 0x00,   // mov eax, 4
+    0xBB, 0x01, 0x00, 0x00, 0x00,   // mov ebx, 1
+    0xB9, 0x00, 0x00, 0x00, 0x00,   // mov ecx, <addr>
+    0xBA, 0x0A, 0x00, 0x00, 0x00,   // mov edx, 10
+    0xCD, 0x30,                      // int 0x30  (write)
+
+    // exit(0)
+    0xB8, 0x01, 0x00, 0x00, 0x00,   // mov eax, 1
+    0xBB, 0x00, 0x00, 0x00, 0x00,   // mov ebx, 0
+    0xCD, 0x30,                      // int 0x30  (exit)
+};
+
+
+static uint8_t user_msg[] = "User task\n";
+
+/* Stub for exiting user tasks */
+static uint8_t exit_stub[] =
+{
+    0xB8, 0x01, 0x00, 0x00, 0x00,  // mov eax, 1  (SYS_EXIT)
+    0x31, 0xDB,                      // xor ebx, ebx
+    0xCD, 0x30,                      // int 0x30
+    0xEB, 0xFE,                      // jmp $ (por si acaso)
+};
+
+static uint32_t *saved_kernel_esp = NULL;
+static uint32_t m_let_scheduler_run = 0;
+task_t* current_task = NULL;
+static task_t* task_list = NULL;
+static task_t* to_free = NULL;
+static pid_t task_index = 0;
+static Queue finished_pid_queue;
+
+void dtach_from_childs(task_t *task)
+{
+    child_list_t* current;
+    child_list_t* next;
+
+    current = task->children;
     while (current)
     {
         current->task->parent = NULL;
-        current = current->next;
+        next = current->next;
+        kfree(current);
+        current = next;
     }
-    kfree(task->children);
+    task->children = NULL;
 }
 
 void remove_from_father(task_t* task)
@@ -90,10 +130,15 @@ void close_all_fds(task_t* task)
 {
     for (int i = 0; i < MAX_FDS; i++)
     {
-        if (task->fd_table[i] == true)
-        {
-            sys_close(i);
-        }
+        if (!task->fd_table[i])
+            continue;
+
+        file_t *f = &task->fd_pointers[i];
+        if (f->fops.close && f->fp)
+            f->fops.close(f->fp);
+
+        f->fp = NULL;
+        task->fd_table[i] = false;
     }
 }
 
@@ -105,8 +150,36 @@ void free_finished_tasks()
     remove_from_father(to_free);
     close_all_fds(to_free);
     free_envp(to_free);
-    kfree((void*)to_free->kernel_stack);
-    kfree((void*)to_free->stack);
+    kfree((void*)to_free->kernel_stack_base);
+    if (to_free->is_user)
+        vfree((void*)to_free->stack);
+    else
+        kfree((void*)to_free->stack);
+    if (to_free->stub_page)
+        vfree((void*)to_free->stub_page);
+#warning "This might not be working, check it out"
+    if (to_free->page_dir)
+    {
+        for (int32_t i = 0; i < 1024; i++)
+        {
+            uint32_t virt_start = i * 4 * 1024 * 1024;
+            if (virt_start < 0x08000000 || virt_start >= 0x0C000000)
+                continue;
+            if (!to_free->page_dir->entries[i])
+                continue;
+
+            page_table_t *tbl = (page_table_t*)
+                (to_free->page_dir->entries[i] & 0xFFFFF000);
+            for (int32_t j = 0; j < 1024; j++)
+            {
+                if (tbl->entries[j] & PAGE_PRESENT)
+                    pmm_free_frame(tbl->entries[j] & 0xFFFFF000);
+            }
+            pmm_free_frame((uint32_t)tbl);
+        }
+        pmm_free_frame((uint32_t)to_free->page_dir);
+        to_free->page_dir = NULL;
+    }
     kfree(to_free);
     to_free = NULL;
 }
@@ -157,7 +230,8 @@ void schedule_task_sleep(task_t* task, uint64_t seconds)
 {
     task->state = TASK_SLEEPING;
     task->wake_tick = seconds;
-    scheduler();
+    while (task->state == TASK_SLEEPING)
+        ;
 }
 
 pid_t _wait(int* status)
@@ -166,17 +240,30 @@ pid_t _wait(int* status)
     pid_t pid = dequeue(&finished_pid_queue, &data);
     if (pid == 0)
     {
-        scheduler();
         while (pid == 0)
         {
             pid = dequeue(&finished_pid_queue, &data);
-            if (pid == 0)
-                scheduler();
         }
     }
     if (status)
         *status = data.status;
     return data.pid;
+}
+
+pid_t _waitpid(pid_t pid, int *status, int options)
+{
+    task_t *child = get_task_by_pid(pid);
+    if (!child || child->parent != current_task)
+        return -1;
+    
+    current_task->state = TASK_WAITING;
+    while (child->state != TASK_ZOMBIE)
+        ;
+    
+    if (status)
+        *status = child->exit_status;
+    
+    return pid;
 }
 
 task_t* get_task_by_pid(pid_t pid)
@@ -199,80 +286,96 @@ void check_wake_up(task_t* task)
     }
 }
 
-task_t* get_next_task()
+// task_t* get_next_task()
+// {
+//     task_t *current = current_task->next;
+//     check_wake_up(current);
+//     while (current->state == TASK_WAITING || current->state == TASK_SLEEPING)
+//     {
+//         current = current->next;
+//         check_wake_up(current);
+//         if (current->pid == 0)
+//         {
+//             current = current->next;
+//         }
+//     }
+//     return current;
+// }
+
+task_t* get_next_task(void)
 {
-    task_t *current = current_task->next;
-    check_wake_up(current);
-    while (current->state == TASK_WAITING || current->state == TASK_SLEEPING)
+    task_t *start   = current_task->next;
+    task_t *current = start;
+
+    do
     {
-        current = current->next;
         check_wake_up(current);
-        if (current->pid == 0)
-        {
-            current = current->next;
-        }
-    }
-    return current;
+        if (current->pid != 0 &&
+            ((current->state == TASK_READY)  || (current->state == TASK_RUNNING)))
+            return current;
+        current = current->next;
+    } while (current != start);
+
+    return task_list;
 }
 
-void scheduler(void)
+void set_run_scheduler(int value)
 {
-    if (!current_task)
+    m_let_scheduler_run = value;
+}
+
+#warning "I use this function as a kind of lock to prevent scheduler from running in critical sections, but maybe it would be better to implement a more robust locking mechanism."
+void pause_scheduler(int pause)
+{
+    static int prev_value = 0;
+    if (pause && prev_value == 0)
     {
-        if (!task_list)
-            return;
-        current_task = task_list;
+        prev_value = m_let_scheduler_run;
+        m_let_scheduler_run = 0;
     }
-    
+    else if (pause == 0 && prev_value != 0)
+    {
+        m_let_scheduler_run = prev_value;
+        prev_value = 0;
+    }
+}
+
+uint32_t timer_schedule(uint32_t *iframe_esp)
+{
+    static int inside_timer_schedule = 0;
+    if (!current_task || !task_list || !m_let_scheduler_run || inside_timer_schedule)
+        return 0;
+
+    inside_timer_schedule = 1;
+    irq_handler_timer();
     free_finished_tasks();
 
     task_t *next = get_next_task();
-
-    if (next->pid == 0)
+    if (next == current_task)
     {
-        next = next->next;
-    }
-
-    while (next->state == TASK_WAITING)
-    {
-        next = next->next;
-        if (next->pid == 0)
-        {
-            next = next->next;
-        }
+        inside_timer_schedule = 0;
+        return 0;
     }
 
     task_t *prev = current_task;
-    tss_set_stack(next->kernel_stack);
+
+    prev->cpu.esp_ = (uint32_t)iframe_esp;
 
     current_task = next;
-    if (next->state == TASK_READY)
-    {
+    if (next->state == TASK_READY || next->state == TASK_RUNNING)
         next->state = TASK_RUNNING;
-    }
-    else if (next->state == TASK_RUNNING)
-    {
-        uint32_t *stack = (uint32_t*)next->cpu.esp_;
-        *--stack = (uint32_t)handle_signals;
-        next->cpu.esp_ = (uint32_t)stack;
-    }
-    // if (next->pid == 5)
-    //     while(1);
-    
-    // puts_color("Scheduler\n", current_task->pid); // easy way of seeing scheduler working.
-    // puts_color("Scheduler\n", LIGHT_MAGENTA);
+
+    tss_set_stack(next->kernel_stack);
     set_active_env(next->env);
-    if (next->is_user)
-    {
-        // puts_color("Switching to user\n", LIGHT_MAGENTA);
-        switch_context_to_user(prev, next);
-    }
+
+#warning "This might cause problems as by default tasks would not have page dir, so they would be switched to kernel dir, but maybe it's not a problem as kernel tasks don't need it. Just keep it in mind."
+    if (next->page_dir)
+        vmm_switch_directory(next->page_dir);
     else
-        switch_context(prev, next);
-    // puts_color("Scheduler\n", RED);
-    /* think this should not be here maybe (?)*/
-    enable_interrupts();
-    outb(0x20, 0x20);
+        vmm_set_kernel_dir();
+
+    inside_timer_schedule = 0;
+    return next->cpu.esp_;
 }
 
 void add_new_task(task_t* new_task)
@@ -295,25 +398,39 @@ void add_new_task(task_t* new_task)
     }
 }
 
-static void task_exit_task(task_t* task, int signal)
+static void task_exit_task(task_t *task, int signal)
 {
     if (task->on_exit)
         task->on_exit();
 
-    task_t *prev = current_task;
+    /* Unlink from the circular list */
+    task_t *prev = task_list;
     while (prev->next != task)
         prev = prev->next;
 
-    prev->next = task->next;
+    if (prev == task)
+    {
+        /* Only one task left — list becomes empty */
+        task_list = NULL;
+    }
+    else
+    {
+        prev->next = task->next;
+        if (task_list == task)
+            task_list = task->next;
+    }
 
     pid_t pid = task->pid;
-
     task->state = TASK_ZOMBIE;
-    // printf("Task %d exited with status %d ---\n", pid, signal);
     enqueue(&finished_pid_queue, pid, signal);
+    if (to_free)
+    {
+        /* If there's already a task waiting to be freed, free it now */
+        free_finished_tasks();
+    }
     to_free = task;
 
-    scheduler();
+    /* should we call scheduler()? */
 }
 
 static void task_exit_pid(pid_t task_id)
@@ -336,7 +453,7 @@ void _exit(int status)
 
 void kill_task(int signal)
 {
-    // printf("Killing task %d With signal:%d--------------\n", current_task->pid, signal);
+    // kprintf("Killing task %d With signal:%d--------------\n", current_task->pid, signal);
     task_exit_task(current_task, signal);
 }
 
@@ -361,10 +478,26 @@ void add_child(task_t* parent, task_t* child)
     }
 }
 
+void fork_init_fds(task_t *child, task_t *parent)
+{
+    memcpy(child->fd_table, parent->fd_table, sizeof(parent->fd_table));
+    
+    for (int i = 0; i < MAX_FDS; i++)
+    {
+        if (!child->fd_table[i])
+            continue;
+        memcpy(&child->fd_pointers[i], &parent->fd_pointers[i], sizeof(file_t));
+        child->fd_pointers[i].ref_count++;
+#warning could be an issue as each file_t might have pointers to other structures that also need ref counting, but for now it works as is because we only have tty devices that don't have such pointers, just keep it in mind if you add new types of file_t in the future.
+    }
+}
+
 /* this is of course not ok. */
 void init_standard_fds(task_t *task)
 {
     tty_device_t* tty_device = kmalloc(sizeof(tty_device_t));
+    memset(tty_device, 0, sizeof(tty_device_t));
+
     task->fd_table[0] = true;
     open_tty_device(tty_device, &task->fd_pointers[0]);
     
@@ -398,19 +531,24 @@ void create_task(void (*entry)(void), char* name, void (*on_exit)(void))
     stack = (uint32_t*)((uint32_t)stack & 0xFFFFFFF0);
     stack += STACK_SIZE / sizeof(uint32_t);
 
-    kernel_stack = (uint32_t*)((uint32_t)kernel_stack & 0xFFFFFFF0);
-    kernel_stack += STACK_SIZE / sizeof(uint32_t);
+    *--stack = 0x202;
+    *--stack = 0x08;
+    *--stack = (uint32_t)entry;
 
-    // Simulate interrupt frame (EIP, EFLAGS, etc.)
-    *--stack = 0x202;   // EFLAGS (IF enabled)
-    *--stack = 0x08;    // CS (kernel code segment)
-    *--stack = (uint32_t)task_exit; // EIP
-    *--stack = (uint32_t)entry; // EIP
+    *--stack = 0;
+    *--stack = 0;
+    *--stack = 0;
+    *--stack = 0;
+    *--stack = 0;
+    *--stack = 0;
+    *--stack = 0;
+    *--stack = 0;
 
     task->pid = task_index++;
     task->cpu.esp_ = (uint32_t)stack; // Point to the simulated interrupt frame
     task->state = TASK_READY;
-    task->kernel_stack = (uint32_t)kernel_stack;
+    task->kernel_stack = (uintptr_t)(stack + STACK_SIZE / sizeof(uint32_t));
+    task->stack = 0;
     memcpy(task->name, name, strlen(name) > 15 ? 15 : strlen(name));
     task->name[strlen(name) > 15 ? 15 : strlen(name)] = '\0';
     task->on_exit = on_exit;
@@ -426,212 +564,64 @@ void create_task(void (*entry)(void), char* name, void (*on_exit)(void))
     add_new_task(task);
 }
 
-void create_user_task(void (*entry)(char**), char* name, void (*on_exit)(void))
+pid_t _do_fork(iret_regs_t* parent_frame)
 {
-    task_t *task;
-    uint32_t *base;
-    uint32_t *user_stack;
-    uint32_t *kernel_stack;
-    uint32_t *user_stack_top;
-    int env_size;
-    int i;
-    char* key;
-    char* equal;
-    char* value;
-
-    if (task_index >= MAX_ACTIVE_TASKS)
-    {
-        puts_color("Max number of tasks reached\n", RED);
-        return;
-    }
-    
-    task = kmalloc(sizeof(task_t));
-
-    base = (uint32_t*)vmalloc(USER_STACK_SIZE, true);
-    memset(base, 0, USER_STACK_SIZE);
-
-    user_stack_top = base + (USER_STACK_SIZE / sizeof(uint32_t)) - 1;
-
-    kernel_stack = kmalloc(STACK_SIZE);
-    kernel_stack = (uint32_t*)((uint32_t)kernel_stack & 0xFFFFFFF0);
-    kernel_stack += STACK_SIZE / sizeof(uint32_t);
-
-    task->env = env_hashtable_create(128);
-    for (i = 0; default_envp[i]; i++)
-    {
-        key = default_envp[i];
-        equal = strchr(key, '=');
-        value = equal;
-        *equal = '\0';
-        *value = '\0';
-        value++;
-        env_hashtable_set(task->env, key, value);
-        *equal = '=';
-    }
-
-    char** envp = get_full_env(task->env);
-
-    user_stack = user_stack_top;
-    *--user_stack = 0x2B;
-    *--user_stack = (uint32_t)user_stack_top;
-    *--user_stack = (uint32_t)task_exit; // EIP
-    *--user_stack = 0x202;
-    *--user_stack = 0x23;
-    *--user_stack = (uint32_t)envp;
-    *--user_stack;
-    *--user_stack = (uint32_t)entry;
-
-    printf("User stack top after building iret frame: %p\n", user_stack);
-
-    // make_page_user((uintptr_t)entry);
-
-    task->pid = task_index++;
-    task->cpu.esp_ = (uint32_t)user_stack;
-    task->kernel_stack = (uint32_t)kernel_stack;
-    task->stack = (uint32_t)base;
-    task->state = TASK_READY;
-    memcpy(task->name, name, strlen(name) > 15 ? 15 : strlen(name));
-    task->name[strlen(name) > 15 ? 15 : strlen(name)] = '\0';
-    task->on_exit = on_exit;
-    task->entry_env = entry;
-    task->uid = 1000;
-    task->euid = 1000;
-    task->gid = 1000;
-    task->is_user = true;
-    memset(task->fd_table, 0, sizeof(task->fd_table));
-    task->screen_echo = true;
-    init_standard_fds(task);
-    init_signals(task);
-    add_new_task(task);
-}
-
-pid_t _do_fork(const cpu_state_t *parent_state)
-{
-    if (task_index >= MAX_ACTIVE_TASKS)
-    {
-        puts_color("Max number of tasks reached\n", RED);
-        return -1;
-    }
-
-    task_t *parent = current_task;
-    task_t *child = kmalloc(sizeof(task_t));
+    task_t* parent = current_task;
+    task_t* child = kmalloc(sizeof(task_t));
     if (!child)
         return -1;
+    memcpy(child, parent, sizeof(task_t));
 
-    uint32_t live_esp = parent_state->esp_;
-
-
-    /*
-     * Determine the parent's aligned stack top.
-     * (This must match the way create_task() computes it.)
-     */
-    uint32_t *parent_raw_stack = (uint32_t *)parent->stack;
-    uint32_t *parent_stack_top = (uint32_t *)((uint32_t)parent_raw_stack & 0xFFFFFFF0);
-    parent_stack_top += STACK_SIZE / sizeof(uint32_t);
-
-    /* Calculate the used portion of the parent's stack in bytes.
-       (Stack grows downward so: used_bytes = parent_stack_top - live_esp) */
-    size_t used_bytes = (uint32_t)parent_stack_top - live_esp;
-
-    /*
-     * Allocate and align a new user stack for the child.
-     */
-    uint32_t *child_raw_stack = kmalloc(STACK_SIZE);
-    if (!child_raw_stack)
-        return -1;
-    child->stack = (uint32_t)child_raw_stack;
-    uint32_t *child_stack_top = (uint32_t *)((uint32_t)child_raw_stack & 0xFFFFFFF0);
-    child_stack_top += STACK_SIZE / sizeof(uint32_t);
-
-    /*
-     * Compute the child's new ESP so that the same amount of stack is used.
-     * That is, if parent's ESP is X bytes below parent's top,
-     * then child's ESP = child_stack_top - used_bytes.
-     */
-    uint32_t *child_cpu_esp = (uint32_t *)((uint32_t)child_stack_top - used_bytes);
-    memcpy(child_cpu_esp, (void*)live_esp, used_bytes);
-
-    /* 
-     * Copy parent's CPU state (captured earlier) into the child.
-     */
-    memcpy(&child->cpu, parent_state, sizeof(cpu_state_t));
-    child->cpu.esp_ = (uint32_t)child_cpu_esp;
-
-    /* --- Adjust the frame pointer (EBP) chain in the copied stack --- */
-    {
-        uintptr_t parent_top_addr = (uintptr_t)parent_stack_top;
-        uintptr_t child_top_addr  = (uintptr_t)child_stack_top;
-        uintptr_t delta = child_top_addr - parent_top_addr;
-
-        if (child->cpu.ebp >= live_esp && child->cpu.ebp < parent_top_addr)
-        {
-            child->cpu.ebp += delta;
-            uint32_t *cur_ebp = (uint32_t *)child->cpu.ebp;
-            while(cur_ebp &&
-                  ((uintptr_t)cur_ebp >= (uintptr_t)child_cpu_esp) &&
-                  ((uintptr_t)cur_ebp < child_top_addr))
-            {
-                uint32_t saved_ebp = *cur_ebp;
-                if (saved_ebp >= live_esp && saved_ebp < parent_top_addr)
-                {
-                    uint32_t new_val = saved_ebp + delta;
-                    *cur_ebp = new_val;
-                    cur_ebp = (uint32_t *)new_val;
-                }
-                else
-                {
-                    break;
-                }
-            }
-        }
-    }
-    /* --- End EBP fix-up --- */
-
-    /*
-     * Insert a trampoline address on the child's stack.
-     *
-     * When the child is scheduled, the context switch will load its ESP
-     * from child->cpu.esp_. A subsequent "ret" will pop the trampoline address,
-     * jump to fork_trampoline (which sets EAX to 0), and then "ret" to the
-     * original return address.
-     */
-    uint32_t *child_sp = (uint32_t *)child->cpu.esp_;
-    child_sp--;  // reserve space for the trampoline address
-    *child_sp = (uint32_t)fork_trampoline;
-    child->cpu.esp_ = (uint32_t)child_sp;
-
-    /*
-     * Allocate a new kernel stack for the child.
-     * (Here we simply allocate a fresh kernel stack rather than copying the parent's.)
-     */
-    uint32_t *child_kstack_alloc = kmalloc(STACK_SIZE);
-    if (!child_kstack_alloc)
-        return -1;
-    uint32_t *child_kstack_top = (uint32_t *)((uint32_t)child_kstack_alloc & 0xFFFFFFF0);
-    child_kstack_top += STACK_SIZE / sizeof(uint32_t);
-    child->kernel_stack = (uint32_t)child_kstack_top;
-
-    /* Set up the remainder of the child's task structure. */
     child->pid = task_index++;
     child->state = TASK_READY;
-    memcpy(child->name, parent->name, 15);
-    child->name[15] = '\0';
-    child->on_exit = parent->on_exit;
-    child->entry = parent->entry;
     child->parent = parent;
+    child->children = NULL;
+
+    if (parent->is_user && parent->page_dir)
+        child->page_dir = vmm_clone_directory(parent->page_dir);
+
+    uint32_t *kstack_base = kmalloc(STACK_SIZE);
+    uint32_t *kstack_top = kstack_base + STACK_SIZE / sizeof(uint32_t);
+    child->kernel_stack_base = (uintptr_t)kstack_base;
+    child->kernel_stack = (uintptr_t)kstack_top;
+
+    uint32_t *ksp = kstack_top;
+
+    /* build iret for child process. */
+    *--ksp = parent_frame->ss_user;
+    *--ksp = parent_frame->esp_user;
+    *--ksp = parent_frame->eflags | 0x200;
+    *--ksp = parent_frame->cs;
+    *--ksp = parent_frame->eip;
+
+    *--ksp = 0; /* eax = 0 for child */
+    *--ksp = parent_frame->ecx;
+    *--ksp = parent_frame->edx;
+    *--ksp = parent_frame->ebx;
+    *--ksp = 0;
+    *--ksp = parent_frame->ebp;
+    *--ksp = parent_frame->esi;
+    *--ksp = parent_frame->edi;
+
+
+    child->cpu.esp_ = (uint32_t)ksp;
+        
+    child->stub_page = 0;
+    child->stack = 0;
+
+    fork_init_fds(child, parent);
     add_child(parent, child);
     init_signals(child);
-
     add_new_task(child);
-    // printf("Forked new task: child pid %d, parent pid %d\n", child->pid, parent->pid);
+
+    kprintf("Forked new task '%s' with PID %d from parent PID %d\n", child->name, child->pid, parent->pid);
+
     return child->pid;
 }
 
-pid_t _fork(void)
+pid_t _fork(iret_regs_t* parent_frame)
 {
-    cpu_state_t state;
-    capture_cpu_state(&state);
-    return _do_fork(&state);
+    return _do_fork(parent_frame);
 }
 
 void scheduler_init(void)
@@ -680,8 +670,9 @@ void task_1(void)
     // puts("Task 1 Started\n");
 
     size_t mmap_size = 16 * 1024;
-    void* user_buffer = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE | PROT_USER,
-                             MAP_ANONYMOUS, -1, 0);
+    // void* user_buffer = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE | PROT_USER,
+    //                          MAP_ANONYMOUS, -1, 0);
+    void* user_buffer = kmalloc(mmap_size);
     if (user_buffer == (void*)-1)
     {
         puts_color("test_mmap: mmap failed!\n", RED);
@@ -698,41 +689,19 @@ void task_1(void)
         }
     }
 
-    munmap(user_buffer, mmap_size);
+    kfree(user_buffer);
     // puts_color("test_mmap: mmap/munmap test passed\n", GREEN);
 
-    signal(2, task_1_sighandler);
+    sys_signal(2, task_1_sighandler);
 
     while (1)
     {
         int return_value;
-        return_value = write(3, "Task 1\n", 7);
+        return_value = sys_write(3, "Task 1\n", 7);
         if (return_value > 0) // it must fail so not failing it's indeed a fail
         {
             puts_color("Error writing\n", RED);
         }
-        scheduler();
-    }
-}
-
-void task_2_exit()
-{
-    // puts_color("Task 2 exited\n", RED);
-}
-
-void task_2(void)
-{
-    // puts("Task 2 Started\n");
-    int i = 0;
-    i = 0;
-    while (i < 500)
-    {
-        i++;
-        // puts("Task 2\n");
-        // if (i % 1000 == 0)
-        // {
-            scheduler();
-        // }
     }
 }
 
@@ -752,8 +721,7 @@ void socket_1()
 
     while(1)
     {
-        write(sock, buffer, strlen(buffer));
-        scheduler();
+        sys_write(sock, buffer, strlen(buffer));
     }
 
 }
@@ -766,6 +734,7 @@ void socket_2()
     char* err_str = "Error reading\n";
     char* read_str = "Read: ";
 
+    sys_sleep(10);
     sock = sys_connect("/foo/bar");
     if (sock < 0)
     {
@@ -773,12 +742,12 @@ void socket_2()
         return;
     }
 
-    printf("sleeping for 5 seconds '%d'\n", get_kuptime());
-    sleep(5);
+    kprintf("sleeping for 5 seconds '%d'\n", get_kuptime());
+    sys_sleep(5);
 
     while(1)
     {
-        return_value = read(sock, buffer, sizeof(buffer));
+        return_value = sys_read(sock, buffer, sizeof(buffer));
         if (return_value < 0)
         {
             // enable_print();
@@ -790,7 +759,7 @@ void socket_2()
         //     puts_color(read_str, GREEN);
         //     puts_color(buffer, GREEN);
         // }
-        scheduler();
+        sys_sleep(3);
     }
 
 }
@@ -799,8 +768,7 @@ void recursion()
 {
     static unsigned int i = 0;
     // puts("Recursion\n" );
-    printf("Recursion %d\n", i++);
-    scheduler();
+    kprintf("Recursion %d\n", i++);
     recursion();
 }
 
@@ -811,7 +779,7 @@ void test_recursion(void)
 
 void task_read()
 {
-    printf("Task 4 Started\n");
+    kprintf("Task 4 Started\n");
     int fd;
     char buffer[11];
     int return_value;
@@ -826,23 +794,23 @@ void task_read()
     char* fd_str = "fd: %d\n";
 
     fd_str = "fd: '%d'\n";
-    fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC);
+    fd = sys_open(filename, O_WRONLY | O_CREAT | O_TRUNC);
     if (fd < 0)
     {
         puts_color("Failed to open /boot/task_read\n", RED);
         return;
     }
 
-    printf(fd_str, fd);
+    kprintf(fd_str, fd);
 
-    write(fd, buffer, 10);
-    close(fd);
+    sys_write(fd, buffer, 10);
+    sys_close(fd, get_current_task());
 
     memset(buffer, 0, sizeof(buffer));
     // while (1)
     // {
         // fd = open("/boot/task_read", O_RDONLY);
-        // printf("fd------: %d\n", fd);
+        // kprintf("fd------: %d\n", fd);
         // if (fd < 0)
         // {
         //     puts_color("Failed to open /boot/task_read\n", RED);
@@ -852,13 +820,13 @@ void task_read()
 
     while (1)
     {
-        fd = open(filename, O_RDONLY);
+        fd = sys_open(filename, O_RDONLY);
         if (fd < 0)
         {
             puts_color("Failed to open /boot/task_read\n", RED);
             return;
         }
-        return_value = read(fd, buffer, sizeof(buffer));
+        return_value = sys_read(fd, buffer, sizeof(buffer));
         // return_value = read(0, buffer, sizeof(buffer));
         // return_value = write(3, buffer, return_value); // error writing to fd 3
         if (return_value <= 0)
@@ -875,42 +843,141 @@ void task_read()
             // puts_color(read_str, GREEN);
             // puts_color(buffer, GREEN);
         }
-        close(fd);
-        yeld();
+        sys_close(fd, get_current_task());
     }
 
 }
 
+/* It needs to get a new page directory if i would want it to work again. */
+void create_user_code_task(char *name)
+{
+    uint8_t *code_page = vmalloc(PAGE_SIZE);
+    uint8_t *data_page = vmalloc(PAGE_SIZE);
+
+    uint32_t code_pa = vmm_get_physical(vmm_current_directory(), (uint32_t)code_page);
+    uint32_t data_pa = vmm_get_physical(vmm_current_directory(), (uint32_t)data_page);
+
+    vmm_unmap_page(vmm_current_directory(), (uint32_t)code_page);
+    vmm_unmap_page(vmm_current_directory(), (uint32_t)data_page);
+    vmm_map_page(vmm_current_directory(), (uint32_t)code_page, code_pa, PAGE_USER_RW);
+    vmm_map_page(vmm_current_directory(), (uint32_t)data_page, data_pa, PAGE_USER_RW);
+
+    uint32_t *dir_entries = (uint32_t *)vmm_current_directory();
+    uint32_t dir_idx = (uint32_t)code_page >> 22;
+    uint32_t tbl_phys = dir_entries[dir_idx] & 0xFFFFF000;
+    uint32_t *tbl = (uint32_t *)tbl_phys;
+    uint32_t tbl_idx = ((uint32_t)code_page >> 12) & 0x3FF;
+    uint32_t pde_flags = dir_entries[dir_idx] & 0xFFF;
+    kprintf("PDE flags for code_page: %x\n", pde_flags);
+    kprintf("PTE flags for code_page: %x\n", tbl[tbl_idx] & 0xFFF);
+
+    memcpy(data_page, user_msg, sizeof(user_msg));
+    memcpy(code_page, user_code, sizeof(user_code));
+
+
+    kprintf("code bytes at %p: ", code_page);
+    for (int i = 0; i < 10; i++)
+    {
+        put_2_hex(code_page[i]);
+        putc(' ');
+    }
+    kprintf("\n");
+    *(uint32_t *)(code_page + 11) = (uint32_t)data_page;
+
+    kprintf("ecx patch at offset 11: %x\n", *(uint32_t*)(code_page + 11));
+
+    create_user_task_at((uint32_t)code_page, name, NULL, NULL);
+}
+
+void create_user_task_at(uint32_t entry_addr, char *name, void (*on_exit)(void), page_directory_t* _task_dir)
+{
+    task_t *task = kmalloc(sizeof(task_t));
+    memset(task, 0, sizeof(task_t));
+
+    uint32_t *kernel_stack_base = kmalloc(STACK_SIZE);
+    uint32_t *kernel_stack_top  = kernel_stack_base + STACK_SIZE / sizeof(uint32_t);
+
+    task->page_dir = _task_dir;
+
+    page_directory_t *task_dir;
+    if (_task_dir)
+        task_dir = _task_dir;
+    else
+        task_dir = vmm_current_directory();
+
+    uint32_t *user_stack_base = vmalloc(USER_STACK_SIZE);
+    uint32_t user_pages = PAGE_ALIGN(USER_STACK_SIZE) / PAGE_SIZE;
+    for (uint32_t i = 0; i < user_pages; i++)
+    {
+        uint32_t va = (uint32_t)user_stack_base + i * PAGE_SIZE;
+        uint32_t pa = vmm_get_physical(task_dir, va);
+        vmm_unmap_page(task_dir, va);
+        vmm_map_page(task_dir, va, pa, PAGE_USER_RW);
+    }
+
+    /* Create exit stub for enforcing all programs to exit cleanly */
+    uint8_t *stub_page = vmalloc(PAGE_SIZE);
+    uint32_t stub_pa = vmm_get_physical(task_dir, (uint32_t)stub_page);
+    vmm_unmap_page(task_dir, (uint32_t)stub_page);
+    vmm_map_page(task_dir, (uint32_t)stub_page, stub_pa, PAGE_USER_RW);
+
+    uint32_t *dir = (uint32_t*)task_dir;
+    dir[(uint32_t)stub_page >> 22] |= PAGE_USER;
+    __asm__ __volatile__("invlpg (%0)" : : "r"((uint32_t)stub_page) : "memory");
+
+    memcpy(stub_page, exit_stub, sizeof(exit_stub));
+
+    task->stub_page = (uintptr_t)stub_page;
+
+    uint32_t *usp = user_stack_base + USER_STACK_SIZE / sizeof(uint32_t);
+    *--usp = (uint32_t)stub_page;
+
+    uint32_t *ksp = kernel_stack_top;
+    *--ksp = 0x2B; /* SS */
+    *--ksp = (uint32_t)usp; /* ESP */
+    *--ksp = 0x202; /* EFLAGS */
+    *--ksp = 0x23; /* CS ring 3*/
+    *--ksp = entry_addr; /* EIP */
+
+    for (uint32_t i = 0; i < 8; i++)
+        *--ksp = 0;
+
+    task->cpu.esp_     = (uint32_t)ksp;
+    task->kernel_stack = (uintptr_t)kernel_stack_top;
+    task->kernel_stack_base = (uintptr_t)kernel_stack_base;
+    task->stack        = (uintptr_t)user_stack_base;
+    task->pid          = task_index++;
+    task->state        = TASK_READY;
+    task->is_user      = true;
+    task->on_exit      = on_exit;
+    task->uid = 1000; task->euid = 1000; task->gid = 1000;
+    task->screen_echo  = true;
+    memcpy(task->name, name, strlen(name) > 15 ? 15 : strlen(name));
+    task->name[15] = '\0';
+    memset(task->fd_table, 0, sizeof(task->fd_table));
+    init_standard_fds(task);
+    init_signals(task);
+
+    add_new_task(task);
+    kprintf("Created user task '%s' with PID %d at entry point %p\n", name, task->pid, entry_addr);
+}
+
 void task_wait()
 {
-    // printf("Task 5 Started\n");
+    // kprintf("Task 5 Started\n");
     pid_t pid;
     int status;
     while (1)
     {
         pid = _wait(&status);
+        (void)pid;
         set_putchar_color(GREEN);
-        // printf("Task 5: Child %d exited with status %d\n", pid, status);
+        // kprintf("Task 5: Child %d exited with status %d\n", pid, status);
         set_putchar_color(LIGHT_GREY);
  
         // puts("Task 5\n");
-        scheduler();
     }
 }
-
-void user_task()
-{
-
-    // while(1);
-
-    while(1)
-    {
-        write(3, "User task\n", 10);
-        yeld();
-    }
-}
-
-#include "../user/ushell/ushell.h"
 
 void unsleep_kshell()
 {
@@ -919,24 +986,30 @@ void unsleep_kshell()
     kshell->state = TASK_READY;
 }
 
-void start_user()
-{
-    create_user_task(ushell, "ushell", unsleep_kshell);
-}
-
 void kshell();
+void ide_task_main(void);
 void start_foo_tasks(void)
 {
     create_task(kshell, "kshell", NULL);
+    create_task(ide_task_main, "ide", NULL);
+
     create_task(task_wait, "task_wait", NULL);
-    // create_task(task_1, "task_1", task_1_exit);
+    create_task(task_1, "task_1", task_1_exit);
     create_task(task_read, "task_read", NULL);
-    create_task(task_2, "task_2", task_2_exit);
     create_task(socket_1, "socket_1", NULL);
     create_task(socket_2, "socket_2", NULL);
+    // create_user_code_task("user_code_task");
+    exec_bin("/hello");
+    exec_bin("/hello");
+    exec_bin("/hello2");
+    exec_bin("/hello2");
+    exec_bin("/hello2");
+    exec_bin("/hello2");
+    exec_bin("/ushell");
+    insmod("/kb_mod.o");
 
     to_free = NULL;
-    // printf("current_task: %p\n", current_task);
+    // kprintf("current_task: %p\n", current_task);
 }
 
 /* ################################################################### */
@@ -947,11 +1020,11 @@ void show_tasks()
     task_t *current = task_list;
     do
     {
-        printf("Task '%s'\n", current->name);
-        printf("  PID: %d\n", current->pid);
-        printf("  ESP: %p\n", current->cpu.esp_);
-        printf("  EIP: %p\n", current->cpu.eip);
-        printf("  State: %d\n", current->state);
+        kprintf("Task '%s'\n", current->name);
+        kprintf("  PID: %d\n", current->pid);
+        kprintf("  ESP: %p\n", current->cpu.esp_);
+        kprintf("  EIP: %p\n", current->cpu.eip);
+        kprintf("  State: %d\n", current->state);
         current = current->next;
     } while (current != task_list);
 }

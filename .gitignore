@@ -11,3 +11,4 @@ kfs*
 .vscode/
 disk.img
 mnt_ext2/
+!uspace/stdlib/kfs_stdlib.h

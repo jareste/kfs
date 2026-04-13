@@ -1,7 +1,7 @@
 #include "display.h"
 #include "../utils/utils.h"
 
-int printf(const char *format, ...)
+int kprintf(const char *format, ...)
 {
     const char *traverse;
     int i;
@@ -52,7 +52,7 @@ int printf(const char *format, ...)
 
         case 'u':
             i = *(unsigned int *)arg;
-            itoa(i, buffer, 10);
+            uitoa(i, buffer, 10);
             for (char *p = buffer; *p != '\0'; p++)
             {
                 putc(*p);
@@ -61,20 +61,20 @@ int printf(const char *format, ...)
             break;
 
         case 'x':
-            i = *(int *)arg;
-            itoa(i, buffer, 16);
+            i = *(unsigned int *)arg;
+            uitoa(i, buffer, 16);
             puts("0x");
             for (char *p = buffer; *p != '\0'; p++)
             {
                 putc(*p);
             }
-            arg = (void *)((int *)arg + 1);
+            arg = (void *)((unsigned int *)arg + 1);
             break;
         case 'p':
-            i = *(int *)arg;
+            i = *(unsigned int *)arg;
             puts("0x");
             put_hex(i);
-            arg = (void *)((int *)arg + 1);
+            arg = (void *)((unsigned int *)arg + 1);
             break;
         case 'z':
             i = *(size_t *)arg;

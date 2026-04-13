@@ -7,6 +7,7 @@
 #include "../keyboard/keyboard.h"
 #include "../display/display.h"
 #include "../tasks/task.h"
+#include "../panic/kpanic.h"
 #include "ext2_fileio.h"
 
 extern int ide_read_sectors(uint32_t lba, uint8_t count, void *buffer);
@@ -65,14 +66,14 @@ static void ext2_read_block(uint32_t block, void *buf)
 {
     uint32_t lba = EXT2_PARTITION_START + block * SECTORS_PER_BLOCK;
     if (ide_read_sectors(lba, SECTORS_PER_BLOCK, buf) < 0)
-        kernel_panic("ext2: read block error");
+        kpanic("ext2: read block error", 1);
 }
 
 static void ext2_write_block(uint32_t block, void *buf)
 {
     uint32_t lba = EXT2_PARTITION_START + block * SECTORS_PER_BLOCK;
     if (ide_write_sectors(lba, SECTORS_PER_BLOCK, buf) < 0)
-        kernel_panic("ext2: write block error");
+        kpanic("ext2: write block error", 1);
 }
 
 static void ext2_read_inode(uint32_t inode_num, struct ext2_inode *inode)
@@ -86,7 +87,8 @@ static void ext2_read_inode(uint32_t inode_num, struct ext2_inode *inode)
     kfree(block);
 }
 
-static void ext2_write_inode(uint32_t inode_num, struct ext2_inode *inode) {
+static void ext2_write_inode(uint32_t inode_num, struct ext2_inode *inode)
+{
     uint32_t index = inode_num - 1;
     uint32_t block_offset = (index * EXT2_INODE_SIZE) / EXT2_BLOCK_SIZE;
     uint32_t offset_in_block = (index * EXT2_INODE_SIZE) % EXT2_BLOCK_SIZE;
@@ -160,7 +162,7 @@ static int ext2_add_dir_entry(uint32_t parent_inode_num, const char *name,
         block = ext2_allocate_block();
         if (block == 0)
         {
-            printf("No free block available\n");
+            kprintf("No free block available\n");
             return -1;
         }
         parent.i_block[0] = block;
@@ -205,7 +207,7 @@ static int ext2_add_dir_entry(uint32_t parent_inode_num, const char *name,
     }
     if (offset >= EXT2_BLOCK_SIZE)
     {
-        printf("Directory full, cannot add entry\n");
+        kprintf("Directory full, cannot add entry\n");
         kfree(blkbuf);
         return -1;
     }
@@ -260,7 +262,7 @@ static int ext2_lookup(uint32_t dir_inode_num, const char *name, uint32_t *child
     ext2_read_inode(dir_inode_num, &dir);
     if (!(dir.i_mode & DIR_MODE))
     {  /* not a directory */
-        printf("Not a directory\n");
+        kprintf("Not a directory\n");
         return -1;
     }
     uint8_t* blkbuf = kmalloc(EXT2_BLOCK_SIZE);
@@ -314,7 +316,7 @@ int ext2_remove_all_files(const char *dir_path)
     uint32_t dir_inode_num;
     if (ext2_resolve_path(dir_path, &dir_inode_num) < 0)
     {
-        printf("ext2_remove_all_files: directory not found: %s\n", dir_path);
+        kprintf("ext2_remove_all_files: directory not found: %s\n", dir_path);
         return -1;
     }
 
@@ -322,7 +324,7 @@ int ext2_remove_all_files(const char *dir_path)
     ext2_read_inode(dir_inode_num, &dir_inode);
     if (!(dir_inode.i_mode & DIR_MODE))
     {
-        printf("ext2_remove_all_files: %s is not a directory\n", dir_path);
+        kprintf("ext2_remove_all_files: %s is not a directory\n", dir_path);
         return -1;
     }
 
@@ -354,7 +356,7 @@ int ext2_remove_all_files(const char *dir_path)
                         file_names[file_count++] = kstrdup(name);
                     else
                     {
-                        printf("ext2_remove_all_files: too many files; increase array size\n");
+                        kprintf("ext2_remove_all_files: too many files; increase array size\n");
                         break;
                     }
                 }
@@ -383,7 +385,7 @@ static int ext2_create_file(uint32_t parent_inode_num, const char *name, uint16_
     uint32_t new_inode = ext2_allocate_inode();
     if (new_inode == 0)
     {
-        printf("No free inode available\n");
+        kprintf("No free inode available\n");
         return -1;
     }
     struct ext2_inode file;
@@ -416,7 +418,7 @@ uint32_t ext2_get_inode(const char *path)
     uint32_t inode_num;
     if (ext2_resolve_path(path, &inode_num) < 0)
     {
-        printf("ext2_get_inode: path not found: %s\n", path);
+        kprintf("ext2_get_inode: path not found: %s\n", path);
         return 0;
     }
     return inode_num;
@@ -425,7 +427,7 @@ uint32_t ext2_get_inode(const char *path)
 char *ext2_pwd(void)
 {
     if (current_dir == EXT2_ROOT_INODE)
-        return vstrdup("/");
+        return kstrdup("/");
 
     char *components[32];
     int count = 0;
@@ -479,9 +481,9 @@ char *ext2_pwd(void)
         if (!found)
         {
             /* Fall back: convert inode number to string */
-            uitoa(curr, name);
+            uitoa(curr, name, 10);
         }
-        components[count++] = vstrdup(name);
+        components[count++] = kstrdup(name);
         curr = parent;
         if (curr == EXT2_ROOT_INODE)
             break;
@@ -525,7 +527,7 @@ ext2_FILE *ext2_fopen(const char *path, const char *mode)
     }
     else
     {
-        printf("ext2_fopen: unsupported mode '%s'\n", mode);
+        kprintf("ext2_fopen: unsupported mode '%s'\n", mode);
         return NULL;
     }
 
@@ -534,7 +536,7 @@ ext2_FILE *ext2_fopen(const char *path, const char *mode)
     {
         if (!allow_write)
         {
-            printf("ext2_fopen: file not found '%s'\n", path);
+            kprintf("ext2_fopen: file not found '%s'\n", path);
             return NULL;
         }
         
@@ -543,13 +545,13 @@ ext2_FILE *ext2_fopen(const char *path, const char *mode)
         uint32_t parent_inode;
         if (ext2_resolve_path(parent_path, &parent_inode) < 0)
         {
-            printf("ext2_fopen: parent directory not found '%s'\n", parent_path);
+            kprintf("ext2_fopen: parent directory not found '%s'\n", parent_path);
             return NULL;
         }
         uint32_t new_inode = ext2_create_file(parent_inode, file_name, FILE_MODE);
         if (!new_inode)
         {
-            printf("ext2_fopen: cannot create file '%s'\n", path);
+            kprintf("ext2_fopen: cannot create file '%s'\n", path);
             return NULL;
         }
         inode_num = new_inode;
@@ -559,7 +561,7 @@ ext2_FILE *ext2_fopen(const char *path, const char *mode)
     ext2_read_inode(inode_num, &in);
     if (in.i_mode & DIR_MODE)
     {
-        printf("ext2_fopen: '%s' is a directory\n", path);
+        kprintf("ext2_fopen: '%s' is a directory\n", path);
         return NULL;
     }
 
@@ -591,39 +593,66 @@ int ext2_fclose(ext2_FILE *stream)
 
 size_t ext2_fread(ext2_FILE *stream, void *ptr, size_t size)
 {
-    if (!stream) return 0;
-    if (stream->mode != 0)
-    {
-        printf("ext2_fread: file not opened for reading\n");
-        return 0;
-    }
-
-    if (size == 0) return 0;
-
-    if (stream->pos >= stream->inode.i_size)
-    {
-        return 0;
-    }
-
-    size_t remain = stream->inode.i_size - stream->pos;
-    if (remain < size)
-    {
-        size = remain;
-    }
-
-    if (stream->inode.i_block[0] == 0)
-    {
-        return 0;
-    }
-
     uint8_t blockbuf[EXT2_BLOCK_SIZE];
-    ext2_read_block(stream->inode.i_block[0], blockbuf);
+    size_t bytes_read;
+    uint8_t *out;
+    size_t remain;
+    size_t to_copy;
+    uint32_t block_num;
+    uint32_t file_offset;
+    uint32_t block_index;
+    uint32_t block_offset;
+    uint32_t indirect_index;
 
-    memcpy(ptr, blockbuf + stream->pos, size);
+    if (!stream || stream->mode != 0)
+        return 0;
+    if (size == 0)
+        return 0;
+    if (stream->pos >= stream->inode.i_size)
+        return 0;
 
-    stream->pos += size;
+    remain = stream->inode.i_size - stream->pos;
+    if (remain < size)
+        size = remain;
 
-    return size;
+    out = (uint8_t*)ptr;
+    bytes_read = 0;
+    while (bytes_read < size)
+    {
+        file_offset = stream->pos + bytes_read;
+        block_index = file_offset / EXT2_BLOCK_SIZE;
+        block_offset = file_offset % EXT2_BLOCK_SIZE;
+
+        block_num = 0;
+        if (block_index < 12)
+        {
+            block_num = stream->inode.i_block[block_index];
+        }
+        else
+        {
+            indirect_index = block_index - 12;
+            if (indirect_index < EXT2_BLOCK_SIZE / 4)
+            {
+                uint32_t indirect_buf[EXT2_BLOCK_SIZE / 4];
+                ext2_read_block(stream->inode.i_block[12], (uint8_t*)indirect_buf);
+                block_num = indirect_buf[indirect_index];
+            }
+        }
+
+        if (block_num == 0) break;
+
+        ext2_read_block(block_num, blockbuf);
+
+        to_copy = EXT2_BLOCK_SIZE - block_offset;
+        if (to_copy > size - bytes_read)
+            to_copy = size - bytes_read;
+
+        memcpy(out + bytes_read, blockbuf + block_offset, to_copy);
+        bytes_read += to_copy;
+    }
+
+    stream->pos += bytes_read;
+    return bytes_read;
 }
 
 size_t ext2_fwrite(ext2_FILE *stream, const void *ptr, size_t size)
@@ -631,7 +660,7 @@ size_t ext2_fwrite(ext2_FILE *stream, const void *ptr, size_t size)
     if (!stream) return 0;
     if (stream->mode != 1)
     {
-        printf("ext2_fwrite: file not opened for writing\n");
+        kprintf("ext2_fwrite: file not opened for writing\n");
         return 0;
     }
 
@@ -642,7 +671,7 @@ size_t ext2_fwrite(ext2_FILE *stream, const void *ptr, size_t size)
         uint32_t new_block = ext2_allocate_block();
         if (!new_block)
         {
-            printf("ext2_fwrite: no free block\n");
+            kprintf("ext2_fwrite: no free block\n");
             return 0;
         }
         stream->inode.i_block[0] = new_block;
@@ -684,21 +713,21 @@ int create_device_node(const char *dir, const char *name, module_t *module)
     uint32_t parent_inode;
     if (ext2_resolve_path(dir, &parent_inode) < 0)
     {
-        printf("ext2_fopen: parent directory not found '%s'\n", dir);
+        kprintf("ext2_fopen: parent directory not found '%s'\n", dir);
         return -1;
     }
 
     int inode_num = ext2_create_file(parent_inode, name, DEVICE_MODE);
     if (inode_num == -1)
     {
-        printf("create_device_node: failed to create file %s\n", path);
+        kprintf("create_device_node: failed to create file %s\n", path);
         return -1;
     }
 
     ext2_FILE *file = ext2_fopen(path, "w");
     if (!file)
     {
-        printf("create_device_node: failed to open file %s\n", path);
+        kprintf("create_device_node: failed to open file %s\n", path);
         return -1;
     }
     ext2_fwrite(file, &module->module_id, sizeof(module->module_id));
@@ -716,7 +745,7 @@ int delete_device_node(const char *dir, const char *name)
     uint32_t inode_num;
     if (ext2_resolve_path(path, &inode_num) < 0)
     {
-        printf("delete_device_node: file not found '%s'\n", path);
+        kprintf("delete_device_node: file not found '%s'\n", path);
         return -1;
     }
 
@@ -743,7 +772,7 @@ int sys_open(const char *path, int flags)
     }
     if (fd == MAX_FDS)
     {
-        printf("sys_open: too many open files\n");
+        kprintf("sys_open: too many open files\n");
         return -1;
     }
 
@@ -777,7 +806,7 @@ int sys_open(const char *path, int flags)
         module_t *mod = get_module_by_id(mod_num);
         if (!mod)
         {
-            printf("sys_open: module not found: %d\n", mod_num);
+            kprintf("sys_open: module not found: %d\n", mod_num);
             return -1;
         }
         current->fd_pointers[fd].fops.read = mod->read;
@@ -827,17 +856,17 @@ int sys_open(const char *path, int flags)
     return fd;
 }
 
-int sys_close(int fd)
+int sys_close(int fd, task_t *task)
 {
-    task_t* current;
+    // task_t* current;
     file_t* file_obj;
     
-    current = get_current_task();
-    if (fd < 0 || fd >= MAX_FDS || current->fd_table[fd] == false)
+    // current = get_current_task();
+    if (fd < 0 || fd >= MAX_FDS || task->fd_table[fd] == false)
         return -1;
 
     /* Get pointer to the file object in the array */
-    file_obj = &current->fd_pointers[fd];
+    file_obj = &task->fd_pointers[fd];
     if (file_obj->ref_count > 1)
     {
         file_obj->ref_count--;
@@ -854,8 +883,8 @@ int sys_close(int fd)
     //     ext2_fclose(file_obj->fp);
     
     /* Mark slot as free and zero out the structure */
-    current->fd_table[fd] = false;
-    memset(&current->fd_pointers[fd], 0, sizeof(file_t));
+    task->fd_table[fd] = false;
+    memset(&task->fd_pointers[fd], 0, sizeof(file_t));
     return 0;
 }
 
@@ -877,7 +906,7 @@ ssize_t sys_read(int fd, void *buf, size_t count)
         if (mod && mod->read)
         {
             size_t offset = file_obj->offset;
-            mod->read(mod, buf, count, &file_obj->offset);
+            mod->read(buf, count, &file_obj->offset);
             if (file_obj->offset > 0)
                 return file_obj->offset - offset;
             else
@@ -919,6 +948,35 @@ ssize_t sys_read(int fd, void *buf, size_t count)
     // n = ext2_fread(buf, 1, count, file_obj->file);
     // file_obj->offset = file_obj->file->pos;
     return n;
+}
+
+ssize_t sys_lseek(int fd, ssize_t offset, int whence)
+{
+    task_t *current = get_current_task();
+    if (fd < 0 || fd >= MAX_FDS || !current->fd_table[fd])
+        return -EBADF;
+
+    file_t *file_obj = &current->fd_pointers[fd];
+    if (file_obj->type != FD_FILE)
+        return -1;
+
+    ext2_FILE *fp = file_obj->fp;
+    size_t new_pos;
+    if (whence == SEEK_SET)
+        new_pos = offset;
+    else if (whence == SEEK_CUR)
+        new_pos = fp->pos + offset;
+    else if (whence == SEEK_END)
+        new_pos = fp->inode.i_size + offset;
+    else
+        return -1;
+
+    if (new_pos < 0 || new_pos > fp->inode.i_size)
+        return -1;
+
+    fp->pos = new_pos;
+    file_obj->offset = new_pos;
+    return new_pos;
 }
 
 /* It's supposed to work but has not been tested. */
@@ -986,14 +1044,14 @@ void ext2_cmd_ls(const char *path)
     uint32_t inode_num;
     if (ext2_resolve_path(path, &inode_num) < 0)
     {
-        printf("Directory not found\n");
+        kprintf("Directory not found\n");
         return;
     }
     struct ext2_inode dir;
     ext2_read_inode(inode_num, &dir);
     if (!(dir.i_mode & DIR_MODE))
     {
-        printf("Not a directory\n");
+        kprintf("Not a directory\n");
         return;
     }
     uint8_t* blkbuf = kmalloc(EXT2_BLOCK_SIZE);
@@ -1008,11 +1066,11 @@ void ext2_cmd_ls(const char *path)
             char name[256];
             memcpy(name, de->name, de->name_len);
             name[de->name_len] = '\0';
-            printf("%s  ", name);
+            kprintf("%s  ", name);
         }
         offset += de->rec_len;
     }
-    printf("\n");
+    kprintf("\n");
     kfree(blkbuf);
 }
 
@@ -1021,14 +1079,14 @@ void ext2_cmd_cat(const char *path)
     uint32_t inode_num;
     if (ext2_resolve_path(path, &inode_num) < 0)
     {
-        printf("File not found\n");
+        kprintf("File not found\n");
         return;
     }
     struct ext2_inode file;
     ext2_read_inode(inode_num, &file);
     if (file.i_mode & DIR_MODE)
     {
-        printf("Is a directory\n");
+        kprintf("Is a directory\n");
         return;
     }
     if (file.i_block[0] == 0)
@@ -1071,7 +1129,7 @@ void ext2_cmd_touch(const char *path)
     uint32_t parent;
     if (ext2_resolve_path(parent_path, &parent) < 0)
     {
-        printf("Parent directory not found\n");
+        kprintf("Parent directory not found\n");
         return;
     }
     ext2_create_file(parent, file_name, FILE_MODE);
@@ -1087,7 +1145,7 @@ void ext2_cmd_mkdir(const char *path)
     /* check if it exists. */
     if (ext2_resolve_path(path, &parent) == 0)
     {
-        printf("Directory '%s' already exists\n", path);
+        kprintf("Directory '%s' already exists\n", path);
         return;
     }
 
@@ -1109,13 +1167,13 @@ void ext2_cmd_mkdir(const char *path)
     }
     if (ext2_resolve_path(parent_path, &parent) < 0)
     {
-        printf("Parent directory not found\n");
+        kprintf("Parent directory not found\n");
         return;
     }
     uint32_t new_inode = ext2_allocate_inode();
     if (new_inode == 0)
     {
-        printf("No free inode available\n");
+        kprintf("No free inode available\n");
         return;
     }
     struct ext2_inode dir;
@@ -1126,7 +1184,7 @@ void ext2_cmd_mkdir(const char *path)
     uint32_t block = ext2_allocate_block();
     if (block == 0)
     {
-        printf("No free block available\n");
+        kprintf("No free block available\n");
         return;
     }
     dir.i_block[0] = block;
@@ -1157,14 +1215,14 @@ void ext2_cmd_rm(const char *path)
     uint32_t inode_num;
     if (ext2_resolve_path(path, &inode_num) < 0)
     {
-        printf("File not found\n");
+        kprintf("File not found\n");
         return;
     }
     struct ext2_inode file;
     ext2_read_inode(inode_num, &file);
     if (file.i_mode & DIR_MODE)
     {
-        printf("Is a directory – use rmdir\n");
+        kprintf("Is a directory – use rmdir\n");
         return;
     }
     char parent_path[256], file_name[256];
@@ -1186,7 +1244,7 @@ void ext2_cmd_rm(const char *path)
     uint32_t parent;
     if (ext2_resolve_path(parent_path, &parent) < 0)
     {
-        printf("Parent directory not found\n");
+        kprintf("Parent directory not found\n");
         return;
     }
     ext2_remove_dir_entry(parent, file_name);
@@ -1200,14 +1258,14 @@ void ext2_cmd_rmdir(const char *path)
     uint32_t inode_num;
     if (ext2_resolve_path(path, &inode_num) < 0)
     {
-        printf("Directory not found\n");
+        kprintf("Directory not found\n");
         return;
     }
     struct ext2_inode dir;
     ext2_read_inode(inode_num, &dir);
     if (!(dir.i_mode & DIR_MODE))
     {
-        printf("Not a directory\n");
+        kprintf("Not a directory\n");
         return;
     }
     uint8_t* blkbuf = kmalloc(EXT2_BLOCK_SIZE);
@@ -1224,7 +1282,7 @@ void ext2_cmd_rmdir(const char *path)
     kfree(blkbuf);
     if (count > 2)
     {
-        printf("Directory not empty\n");
+        kprintf("Directory not empty\n");
         return;
     }
     char parent_path[256], dname[256];
@@ -1246,7 +1304,7 @@ void ext2_cmd_rmdir(const char *path)
     uint32_t parent;
     if (ext2_resolve_path(parent_path, &parent) < 0)
     {
-        printf("Parent directory not found\n");
+        kprintf("Parent directory not found\n");
         return;
     }
     ext2_remove_dir_entry(parent, dname);
@@ -1259,14 +1317,14 @@ void ext2_cmd_cd(const char *path)
     uint32_t inode_num;
     if (ext2_resolve_path(path, &inode_num) < 0)
     {
-        printf("Directory not found\n");
+        kprintf("Directory not found\n");
         return;
     }
     struct ext2_inode inode;
     ext2_read_inode(inode_num, &inode);
     if (!(inode.i_mode & DIR_MODE))
     {
-        printf("Not a directory\n");
+        kprintf("Not a directory\n");
         return;
     }
     current_dir = inode_num;
@@ -1277,7 +1335,7 @@ void ext2_cmd_cp(const char *src_path, const char *dst_path)
     uint32_t src_inode_num;
     if (ext2_resolve_path(src_path, &src_inode_num) < 0)
     {
-        printf("cp: source not found: %s\n", src_path);
+        kprintf("cp: source not found: %s\n", src_path);
         return;
     }
 
@@ -1286,7 +1344,7 @@ void ext2_cmd_cp(const char *src_path, const char *dst_path)
 
     if (src_inode.i_mode & DIR_MODE)
     {
-        printf("cp: source is a directory (not supported)\n");
+        kprintf("cp: source is a directory (not supported)\n");
         return;
     }
 
@@ -1305,7 +1363,7 @@ void ext2_cmd_cp(const char *src_path, const char *dst_path)
     uint32_t parent_inode_num;
     if (ext2_resolve_path(parent_path, &parent_inode_num) < 0)
     {
-        printf("cp: destination directory not found: %s\n", parent_path);
+        kprintf("cp: destination directory not found: %s\n", parent_path);
         kfree(data_buf);
         return;
     }
@@ -1313,7 +1371,7 @@ void ext2_cmd_cp(const char *src_path, const char *dst_path)
     uint32_t new_inode_num = ext2_create_file(parent_inode_num, file_name, FILE_MODE /* regular file */);
     if (new_inode_num == 0)
     {
-        printf("cp: failed to create destination file: %s\n", dst_path);
+        kprintf("cp: failed to create destination file: %s\n", dst_path);
         kfree(data_buf);
         return;
     }
@@ -1326,7 +1384,7 @@ void ext2_cmd_cp(const char *src_path, const char *dst_path)
         uint32_t new_block = ext2_allocate_block();
         if (!new_block)
         {
-            printf("cp: no free block available\n");
+            kprintf("cp: no free block available\n");
             kfree(data_buf);
             return;
         }
@@ -1337,7 +1395,7 @@ void ext2_cmd_cp(const char *src_path, const char *dst_path)
     ext2_write_inode(new_inode_num, &new_inode);
 
     kfree(data_buf);
-    printf("cp: copied '%s' to '%s'\n", src_path, dst_path);
+    kprintf("cp: copied '%s' to '%s'\n", src_path, dst_path);
 }
 
 void ext2_cmd_mv(const char *src_path, const char *dst_path)
@@ -1345,7 +1403,7 @@ void ext2_cmd_mv(const char *src_path, const char *dst_path)
     uint32_t src_inode_num;
     if (ext2_resolve_path(src_path, &src_inode_num) < 0)
     {
-        printf("mv: source not found: %s\n", src_path);
+        kprintf("mv: source not found: %s\n", src_path);
         return;
     }
 
@@ -1358,7 +1416,7 @@ void ext2_cmd_mv(const char *src_path, const char *dst_path)
     uint32_t dst_parent_inode;
     if (ext2_resolve_path(dst_parent, &dst_parent_inode) < 0)
     {
-        printf("mv: destination directory not found: %s\n", dst_parent);
+        kprintf("mv: destination directory not found: %s\n", dst_parent);
         return;
     }
 
@@ -1367,7 +1425,7 @@ void ext2_cmd_mv(const char *src_path, const char *dst_path)
     {
         // For simplicity, we fail if destination exists
         // (In real Unix, we'd remove it if it's a file, or fail if it's a non-empty directory)
-        printf("mv: destination already exists: %s\n", dst_path);
+        kprintf("mv: destination already exists: %s\n", dst_path);
         return;
     }
 
@@ -1376,23 +1434,23 @@ void ext2_cmd_mv(const char *src_path, const char *dst_path)
     uint8_t file_type = (src_inode.i_mode & DIR_MODE) ? EXT2_FT_DIR : EXT2_FT_REG_FILE;
     if (ext2_add_dir_entry(dst_parent_inode, dst_name, src_inode_num, file_type) < 0)
     {
-        printf("mv: failed to create destination entry\n");
+        kprintf("mv: failed to create destination entry\n");
         return;
     }
 
     uint32_t src_parent_inode;
     if (ext2_resolve_path(src_parent, &src_parent_inode) < 0)
     {
-        printf("mv: source parent not found?!\n");
+        kprintf("mv: source parent not found?!\n");
         return;
     }
     if (ext2_remove_dir_entry(src_parent_inode, src_name) < 0)
     {
-        printf("mv: failed to remove old directory entry\n");
+        kprintf("mv: failed to remove old directory entry\n");
         return;
     }
 
-    printf("mv: moved '%s' to '%s'\n", src_path, dst_path);
+    kprintf("mv: moved '%s' to '%s'\n", src_path, dst_path);
 }
 
 static void cmd_ls();
@@ -1435,53 +1493,53 @@ static void cmd_ls()
 
 static void cmd_cat()
 {
-    printf("Enter the file name: ");
+    kprintf("Enter the file name: ");
     ext2_cmd_cat(get_line());
 }
 
 static void cmd_touch()
 {
-    printf("Enter the file name: ");
+    kprintf("Enter the file name: ");
     ext2_cmd_touch(get_line());
 }
 
 static void cmd_mkdir()
 {
-    printf("Enter the directory name: ");
+    kprintf("Enter the directory name: ");
     ext2_cmd_mkdir(get_line());
 }
 
 static void cmd_rm()
 {
-    printf("Enter the file name: ");
+    kprintf("Enter the file name: ");
     ext2_cmd_rm(get_line());
 }
 
 static void cmd_rmdir()
 {
-    printf("Enter the directory name: ");
+    kprintf("Enter the directory name: ");
     ext2_cmd_rmdir(get_line());
 }
 
 static void cmd_cd()
 {
-    printf("Enter the directory name: ");
+    kprintf("Enter the directory name: ");
     ext2_cmd_cd(get_line());
 }
 static void cmd_cp()
 {
-    printf("Enter source file: ");
+    kprintf("Enter source file: ");
     char *src = get_line();
-    printf("Enter destination: ");
+    kprintf("Enter destination: ");
     char *dst = get_line();
     ext2_cmd_cp(src, dst);
 }
 
 static void cmd_mv()
 {
-    printf("Enter source file: ");
+    kprintf("Enter source file: ");
     char *src = get_line();
-    printf("Enter destination: ");
+    kprintf("Enter destination: ");
     char *dst = get_line();
     ext2_cmd_mv(src, dst);
 }
@@ -1491,12 +1549,12 @@ static void cmd_pwd(void)
     char *cwd = ext2_pwd();
     if (cwd)
     {
-        printf("%s\n", cwd);
+        kprintf("%s\n", cwd);
         kfree(cwd);
     }
     else
     {
-        printf("pwd: error retrieving current directory\n");
+        kprintf("pwd: error retrieving current directory\n");
     }
 }
 
@@ -1507,7 +1565,7 @@ static void cmd_tfds(void)
     fd = sys_open("/etc/users.config", O_RDONLY);
     if (fd < 0)
     {
-        printf("Failed to open /etc/users.config\n");
+        kprintf("Failed to open /etc/users.config\n");
         return;
     }
 
@@ -1515,15 +1573,15 @@ static void cmd_tfds(void)
     ssize_t n = sys_read(fd, buf, sizeof(buf));
     if (n < 0)
     {
-        printf("Failed to read /etc/users.config\n");
-        sys_close(fd);
+        kprintf("Failed to read /etc/users.config\n");
+        sys_close(fd, get_current_task());
         return;
     }
 
-    printf("Read %d bytes from /etc/users.config:\n", n);
+    kprintf("Read %d bytes from /etc/users.config:\n", n);
     for (int i = 0; i < n; i++)
         putc(buf[i]);
-    sys_close(fd);
+    sys_close(fd, get_current_task());
 }
 
 static void cmd_tfdopen()
@@ -1536,34 +1594,34 @@ static void cmd_tfdopen()
     fd = sys_open("helloTFD.txt", O_WRONLY | O_CREAT | O_TRUNC);
     if (fd < 0)
     {
-        printf("Failed to open hello.txt for writing\n");
+        kprintf("Failed to open hello.txt for writing\n");
         return;
     }
 
     sys_write(fd, msg, strlen(msg));
-    sys_close(fd);
+    sys_close(fd, get_current_task());
 
-    printf("Wrote to hello.txt, fd %d\n", fd);
+    kprintf("Wrote to hello.txt, fd %d\n", fd);
 
     fd = sys_open("helloTFD.txt", O_RDONLY);
     if (fd < 0)
     {
-        printf("Failed to open hello.txt for reading\n");
+        kprintf("Failed to open hello.txt for reading\n");
         return;
     }
     memset(buf, 0, sizeof(buf));
     n = sys_read(fd, buf, sizeof(buf) - 1);
 
-    printf("Read from fd(%d) '%d' bytes: %s", fd, n, buf);
+    kprintf("Read from fd(%d) '%d' bytes: %s", fd, n, buf);
     
     if (strcmp(buf, msg) != 0)
     {
-        printf("Failed to read back what was written\n");
-        sys_close(fd);
+        kprintf("Failed to read back what was written\n");
+        sys_close(fd, get_current_task());
         return;
     }
-    printf("Read %u bytes: %s\n", (unsigned)n, buf);
-    sys_close(fd);
+    kprintf("Read %u bytes: %s\n", (unsigned)n, buf);
+    sys_close(fd, get_current_task());
 }
 
 void create_unix_dirs()
@@ -1588,7 +1646,7 @@ void test_fileio()
     ext2_FILE *f = ext2_fopen("hello.txt", "w");
     if (!f)
     {
-        printf("Failed to open hello.txt for writing\n");
+        kprintf("Failed to open hello.txt for writing\n");
         return;
     }
     const char *msg = "Hello from ext12_fwrite!\n";
@@ -1598,13 +1656,13 @@ void test_fileio()
     f = ext2_fopen("hello.txt", "r");
     if (!f)
     {
-        printf("Failed to open hello.txt for reading\n");
+        kprintf("Failed to open hello.txt for reading\n");
         return;
     }
     char buf[128];
     memset(buf, 0, sizeof(buf));
     size_t n = ext2_fread(f, buf, sizeof(buf) - 1);
-    printf("Read %u bytes: %s\n", (unsigned)n, buf);
+    kprintf("Read %u bytes: %s\n", (unsigned)n, buf);
     ext2_fclose(f);
 }
 
@@ -1615,7 +1673,7 @@ void ext2_mount(void)
     ext2_read_block(1, buf);
     memcpy(&ext2.sb, buf, sizeof(struct ext2_super_block));
     if (ext2.sb.s_magic != 0xEF53)
-        kernel_panic("ext2: bad magic number");
+        kpanic("ext2: bad magic number", 1);
     /* Read group descriptor (assumed to be in block 2) */
     ext2_read_block(2, buf);
     memcpy(&ext2.gd, buf, sizeof(struct ext2_group_desc));

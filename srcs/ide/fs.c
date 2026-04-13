@@ -58,9 +58,9 @@ void fs_print_tree(fs_node_t* node, int indent)
         return;
     
     for (int i = 0; i < indent; i++)
-        printf("  ");
+        kprintf("  ");
     
-    printf("%s (inode: %d, size: %d)\n", node->name, node->inode, node->size);
+    kprintf("%s (inode: %d, size: %d)\n", node->name, node->inode, node->size);
     
     if (node->children)
         fs_print_tree(node->children, indent + 1);
@@ -75,7 +75,7 @@ fs_node_t* fs_build_tree_from_inode(uint32_t inode_num, const char* name,
     ext2_inode_t inode;
     if (ext2_read_inode(inode_num, &inode) < 0)
     {
-        printf("Error reading inode %d\n", inode_num);
+        kprintf("Error reading inode %d\n", inode_num);
         return NULL;
     }
     

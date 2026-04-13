@@ -11,13 +11,13 @@ void kdump(void* addr, uint32_t size)
 {
     if (addr == NULL)
     {
-        printf("Invalid address: NULL\n");
+        kprintf("Invalid address: NULL\n");
         return;
     }
 
     // if ((uintptr_t)addr % 4 != 0)
     // {
-    //     printf("Invalid address: Unaligned\n");
+    //     kprintf("Invalid address: Unaligned\n");
     //     return;
     // }
 
@@ -58,8 +58,8 @@ void kdump(void* addr, uint32_t size)
     }
 
     uint32_t remainder = size % 16;
-    // printf("size: %d\n", size);
-    // printf("remainder: %d\n", remainder);
+    // kprintf("size: %d\n", size);
+    // kprintf("remainder: %d\n", remainder);
     if (remainder != 0)
     {
         for (uint32_t j = 0; j < (16 - remainder); j++)

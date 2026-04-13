@@ -6,9 +6,13 @@ BIN_PATH = ./iso/boot/kernel.bin
 
 CC = gcc
 AS = nasm
-# CFLAGS = -m32 -ffreestanding -nostdlib -nodefaultlibs -fno-builtin -fno-exceptions -fno-stack-protector -O3
-CFLAGS = -m32 -ffreestanding -nostdlib -nodefaultlibs -fno-builtin -fno-exceptions -fno-stack-protector -g
-ASFLAGS = -f elf
+# CFLAGS  = -m32 -ffreestanding -nostdlib -nodefaultlibs \
+#            -fno-builtin -fno-exceptions -fno-stack-protector \
+#            -O2 -Wall -Wextra
+CFLAGS  = -m32 -ffreestanding -nostdlib -nodefaultlibs \
+			-fno-builtin -fno-exceptions -fno-stack-protector \
+			-O0 -Wall -Wextra -g
+ASFLAGS = -f elf -g
 LDFLAGS = -m elf_i386
 
 SRC_DIR = srcs
@@ -21,26 +25,25 @@ GRUB_DIR = $(ISO_DIR)/boot/grub
 vpath %.c $(SRC_DIR) $(SRC_DIR)/utils $(SRC_DIR)/display $(SRC_DIR)/keyboard $(SRC_DIR)/gdt \
 			$(SRC_DIR)/idt $(SRC_DIR)/kshell $(SRC_DIR)/io $(SRC_DIR)/time $(SRC_DIR)/memory \
 			$(SRC_DIR)/syscalls $(SRC_DIR)/tasks $(SRC_DIR)/sockets $(SRC_DIR)/ide \
-			$(SRC_DIR)/umgmnt $(SRC_DIR)/user/ushell $(SRC_DIR)/display/tty $(SRC_DIR)/modules
+			$(SRC_DIR)/umgmnt $(SRC_DIR)/display/tty $(SRC_DIR)/modules \
+			$(SRC_DIR)/panic
 
 vpath %.asm $(BOOT_DIR) $(SRC_DIR)/keyboard $(SRC_DIR)/gdt $(SRC_DIR)/utils $(SRC_DIR)/tasks \
-			$(SRC_DIR)/user/syscalls
 
-C_SOURCES = kernel.c strcmp.c strlen.c printf.c putc.c puts.c keyboard.c \
+C_SOURCES = kernel.c strcmp.c strlen.c kprintf.c putc.c puts.c keyboard.c \
 			idt.c itoa.c gdt.c put_hex.c kdump.c kshell.c memset.c strtol.c \
 			hatoi.c get_stack_pointer.c kpanic.c dump_registers_c.c \
-			io.c init_timers.c memory.c put_zu.c pmm.c memcpy.c memcmp.c \
+			io.c init_timers.c put_zu.c pmm.c vmm.c kmalloc.c vmalloc.c memcpy.c memcmp.c \
 			interrupts.c signals.c syscalls.c get_line.c layouts.c \
 			scheduler.c socket.c queue.c ide.c ext2.c users.c sha256.c \
 			strcpy.c users_api.c strncpy.c strncat.c strrchr.c \
-			strtok.c strcspn.c strspn.c strcat.c ushell.c env.c \
+			strtok.c strcspn.c strspn.c strcat.c env.c \
 			strchr.c memmove.c uitoa.c vstrdup.c kstrdup.c sock_registers.c \
-			tty.c modules.c mod_keyboard.c mod_time.c
+			tty.c modules.c mod_keyboard.c mod_time.c elf_loader.c elf_module.c \
+			task_offsets.c
 
 ASM_SOURCES = boot.asm handler.asm gdt_asm.asm dump_registers.asm \
-			  clear_registers.asm tasks.asm write.asm kill.asm \
-			  read.asm signal.asm get_pid.asm sys_yeld.asm exit.asm \
-			  close.asm open.asm sleep.asm fork.asm time.asm usleep.asm
+			  clear_registers.asm tasks.asm
 
 SRC = $(C_SOURCES) $(ASM_SOURCES)
 
@@ -87,13 +90,19 @@ fclean: clean
 
 re: fclean all
 
-run:
-	qemu-system-i386 -kernel kernel.bin -drive file=disk.img,if=ide,index=0,media=disk,format=raw
+# run:
+# 	qemu-system-i386 -kernel kernel.bin -drive file=disk.img,if=ide,index=0,media=disk,format=raw
 
-	# qemu-system-i386 -kernel $(BIN_NAME) #-m 4096
+# 	# qemu-system-i386 -kernel $(BIN_NAME) #-m 4096
+
+# debug:
+# 	qemu-system-i386 -kernel $(BIN_NAME) -s -S -drive file=disk.img,if=ide,index=0,media=disk,format=raw
+
+run:
+	qemu-system-i386 -kernel kernel.bin -drive file=disk.img,if=ide,index=0,media=disk,format=raw -display curses
 
 debug:
-	qemu-system-i386 -kernel $(BIN_NAME) -s -S -drive file=disk.img,if=ide,index=0,media=disk,format=raw
+	qemu-system-i386 -kernel $(BIN_NAME) -drive file=disk.img,if=ide,index=0,media=disk,format=raw -display curses -s -S
 
 run_debug:
 	qemu-system-i386 -kernel $(BIN_NAME) -d int,cpu_reset #-m 4096
@@ -131,11 +140,20 @@ format: crdisk
 	sudo cp hello124.txt mnt_ext2/
 	# sudo mkdir mnt_ext2/etc
 	# sudo cp users.config mnt_ext2/etc/.
+	sudo make -C uspace/stdlib
+	sudo gcc -m32 -static -nostdlib -nostartfiles -ffreestanding -fno-pic -fno-pie -Wl,--build-id=none -o hello test/hello.c
+	sudo gcc -m32 -static -nostdlib -nostartfiles -ffreestanding -fno-pic -fno-pie -Wl,--build-id=none -o hello2 test/hello2.c uspace/stdlib/libkfs_stdlib.a
+	sudo cp hello mnt_ext2/.
+	sudo cp hello2 mnt_ext2/.
+	sudo make -C uspace/programs/ushell
+	sudo cp uspace/programs/ushell/ushell mnt_ext2/.
+	sudo gcc -m32 -c -ffreestanding -fno-builtin -fno-pic -fno-pie -fno-stack-protector -nostdlib -O0  uspace/modules/kb_mod.c -o kb_mod.o
+	sudo cp kb_mod.o mnt_ext2/.
 	sudo cp users.config mnt_ext2/.
 	sudo rm -rf lost+found
 	sudo umount mnt_ext2
 	rm -rf mnt_ext2
-# sudo ./ext2_format disk.img users.config hello124.txt
+	rm -rf hello hello2 ushell kb_mod.o
 	rm ext2_format users.config hello124.txt
 
 .PHONY: all clean fclean re run xorriso release run_release run_grub debug build_iso

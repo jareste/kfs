@@ -4,7 +4,7 @@
 void* vstrdup(const char *s)
 {
     size_t len = strlen(s) + 1;
-    char *p = vmalloc(len, true);
+    char *p = vmalloc(len);
     if (p) memcpy(p, s, len);
     return p;
 }

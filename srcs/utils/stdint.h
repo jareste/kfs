@@ -1,6 +1,8 @@
 #ifndef STDINT_H
 #define STDINT_H
 
+#include <stddef.h>
+
 /* Exact-width integer types */
 typedef signed char int8_t;
 typedef short int int16_t;
@@ -42,8 +44,15 @@ typedef unsigned int uintptr_t;
 typedef long long int intmax_t;
 typedef unsigned long long int uintmax_t;
 
-typedef unsigned long size_t;
-typedef long ssize_t;
+// typedef unsigned long size_t;
+// typedef long ssize_t;
+
+#ifndef size_t
+#define size_t unsigned long
+#endif
+#ifndef ssize_t
+#define ssize_t long
+#endif
 
 /* uid gid euid */
 typedef unsigned int uid_t;

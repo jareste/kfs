@@ -34,14 +34,14 @@ static int login(char *username, char *password)
 
     if (check_password(password, u.pass_hash) == 0)
     {
-        printf("Invalid password.\n");
+        kprintf("Invalid password.\n");
         return -1;
     }
 
     memcpy(&g_current_user, &u, sizeof(user_t));
-    printf("Login successful as '%s'.\n", username);
+    kprintf("Login successful as '%s'.\n", username);
     get_current_task()->state = TASK_WAITING;
-    start_user();
+    #warning "Think how to implement login/logout, if i want it to be on kernel side"
 
     set_current_dir(g_current_user.home_inode);
     clear_kb_buffer();
@@ -54,10 +54,10 @@ static void cmd_login()
     char username[MAX_USER_NAME];
     char password[SHA256_HEX_LEN + 1];
  
-    printf("Username: ");
+    kprintf("Username: ");
     buffer = get_line();
     strcpy(username, buffer);
-    printf("Password: ");
+    kprintf("Password: ");
     start_ofuscation();
     buffer = get_line();
     stop_ofuscation();
@@ -68,7 +68,7 @@ static void cmd_login()
 
 static void cmd_logout()
 {
-    printf("Logout done!\n");
+    kprintf("Logout done!\n");
 }
 
 static void cmd_create_user()
@@ -78,30 +78,30 @@ static void cmd_create_user()
     char *pass;
     char path[256];
 
-    printf("Enter username: ");
+    kprintf("Enter username: ");
     strcpy(u.name, get_line());
     if (user_exists(u.name))
     {
-        printf("User '%s' already exists.\n", u.name);
+        kprintf("User '%s' already exists.\n", u.name);
         return;
     }
 
-    printf("Enter password: ");
+    kprintf("Enter password: ");
     start_ofuscation();
     pass = get_line();
     stop_ofuscation();
     encrypt_password(pass, buffer);
     strcpy(u.pass_hash, buffer);
 
-    printf("Enter UID: ");
+    kprintf("Enter UID: ");
     u.uid = strtol(get_line(), NULL, 10);
-    printf("Enter GID: ");
+    kprintf("Enter GID: ");
     u.gid = strtol(get_line(), NULL, 10);
-    printf("Enter home dir: ");
+    kprintf("Enter home dir: ");
     u.home_inode = ext2_get_inode(get_line());
     u.home_inode = u.home_inode == 0 ? 2 : u.home_inode;
-    printf("Home inode: %d\n", u.home_inode);
-    printf("Enter shell inode: ");
+    kprintf("Home inode: %d\n", u.home_inode);
+    kprintf("Enter shell inode: ");
     u.shell_inode = strtol(get_line(), NULL, 10);
     u.is_valid = true;
 

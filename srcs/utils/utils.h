@@ -2,7 +2,9 @@
 #define UTILS_H
 
 #include "stdint.h"
+#ifndef NULL
 #define NULL (void*)0
+#endif
 #define UNUSED(x); (void)(x);
 #define MB(x) ((x) * 1024 * 1024) /* Convert MB to bytes */
 #define KB(x) (x * 1024) /* Convert KB to bytes */
@@ -55,7 +57,7 @@ size_t strspn(const char *s, const char *accept);
 char *strcat(char *dest, const char *src);
 char *strchr(const char *s, int c);
 void *memmove(void *dest, const void *src, size_t n);
-void uitoa(uint32_t num, char *buf);
+void uitoa(unsigned int value, char *str, int base);
 
 #define ASSERT(x)   if (!(x)) { kernel_panic("Assertion failed: " #x); }
 #define NEVER_HERE  kernel_panic("NEVER_HERE")

@@ -35,7 +35,6 @@ common_isr_handler:
 	cli
 	pusha
 
-	; call c function
 	call isr_handler
 
 	; restores registers
@@ -48,13 +47,42 @@ common_isr_handler:
 	sti
 	iret
 
+extern syscall_handler
+extern timer_schedule
 global syscall_handler_asm
 syscall_handler_asm:
-	pusha
-	call syscall_handler
-	mov [esp + 28], eax   ; This writes to the saved EAX (pusha order: EDI, ESI, EBP, original ESP, EBX, EDX, ECX, EAX)
-	popa
-	iret
+    pusha
+    
+    push esp
+    call syscall_handler
+    add esp, 4
+
+    mov [esp + 28], eax
+
+    push esp
+    call timer_schedule
+    add esp, 4
+
+    test eax, eax
+    jz .no_switch
+
+    mov esp, eax
+
+.no_switch:
+    mov eax, [esp + 36]
+    and eax, 0x3
+    cmp eax, 3
+    jne .do_iret
+
+    mov ax, 0x2B
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+.do_iret:
+    popa
+    iret
 
 ; handles irqs (hardware interrupts)
 common_irq_handler:
@@ -108,8 +136,40 @@ no_error_code_isr_handler 29
 no_error_code_isr_handler 30
 no_error_code_isr_handler 31
 
-;IRQs (hardware interrupts)
-no_error_code_irq_handler 0, 32
+global irq_handler_0
+irq_handler_0:
+    cli
+    pusha
+
+    mov al, 0x20
+    out 0x20, al
+
+    push esp
+    call timer_schedule
+    add esp, 4
+
+    test eax, eax
+    jz .no_switch
+
+    mov esp, eax
+
+.no_switch:
+    ; read CS from iret frame (pusha 32 + EIP 4 = CS 36)
+    mov eax, [esp + 36]
+    and eax, 0x3
+    cmp eax, 3
+    jne .do_iret
+
+    mov ax, 0x2B
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+.do_iret:
+    popa
+    iret
+
 no_error_code_irq_handler 1, 33
 no_error_code_irq_handler 2, 34
 no_error_code_irq_handler 3, 35

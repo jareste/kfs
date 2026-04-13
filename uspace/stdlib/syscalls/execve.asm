@@ -1,11 +1,14 @@
 %define syscall int 0x30
 
-global yeld
-yeld:
+global execve
+execve:
     push ebp
     mov ebp, esp
 
-    mov eax, 158
+    mov ebx, [ebp + 8]
+    mov ecx, [ebp + 12]
+    mov edx, [ebp + 16]
+    mov eax, 11
 
     syscall
 

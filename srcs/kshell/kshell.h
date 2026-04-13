@@ -14,6 +14,7 @@ typedef enum {
     MEMORY,
     DEBUG,
     TASKS,
+    MODULES,
     SECTION_T_MAX
 } section_t;
 
