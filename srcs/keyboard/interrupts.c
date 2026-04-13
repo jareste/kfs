@@ -71,6 +71,7 @@ void page_fault_handler(registers* regs, error_state* stack)
     }
 
     kprintf("EIP at fault: %x\n", stack->eip);
+    kprintf("ECX at fault: %x\n", regs->ecx);
     kprintf("CS  at fault: %x\n", stack->cs);
     kprintf("Page fault at 0x");
     put_hex(faulting_address);

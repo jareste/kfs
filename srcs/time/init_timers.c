@@ -8,7 +8,7 @@
 #define PIT_CONTROL_PORT     0x43
 #define PIT_CHANNEL0_PORT    0x40
 #define PIT_BASE_FREQUENCY   1193182
-#define PIT_FREQUENCY        100
+#define PIT_FREQUENCY        1000
 #define PIC1_COMMAND         0x20
 #define PIC_EOI              0x20
 #define SECONDS_TO_TICKS(x)  ((x) * PIT_FREQUENCY)

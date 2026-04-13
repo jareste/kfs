@@ -5,6 +5,7 @@
 #include "../utils/stdint.h"
 #include "../display/display.h"
 #include "../keyboard/signals.h"
+#include "../keyboard/idt.h"
 #include "../gdt/gdt.h"
 #include "../kshell/kshell.h"
 #include "../utils/queue.h"
@@ -12,7 +13,7 @@
 #include "../display/tty/tty.h"
 
 #define STACK_SIZE 4096
-#define MAX_ACTIVE_TASKS 15
+#define MAX_ACTIVE_TASKS 100
 #define USER_STACK_SIZE 4096
 
 typedef struct __attribute__((packed))
@@ -33,10 +34,6 @@ extern void switch_context(task_t *prev, task_t *next);
 extern void switch_context_to_user(task_t *prev, task_t *next);
 extern void copy_context(task_t *prev, task_t *next);
 void show_tasks();
-
-/* ASM ones */
-extern void fork_trampoline(void);
-extern void capture_cpu_state(cpu_state_t *state);
 
 static command_t commands[] = {
     {"show", "Show active tasks", show_tasks},
@@ -233,6 +230,8 @@ void schedule_task_sleep(task_t* task, uint64_t seconds)
 {
     task->state = TASK_SLEEPING;
     task->wake_tick = seconds;
+    while (task->state == TASK_SLEEPING)
+        ;
 }
 
 pid_t _wait(int* status)
@@ -249,6 +248,22 @@ pid_t _wait(int* status)
     if (status)
         *status = data.status;
     return data.pid;
+}
+
+pid_t _waitpid(pid_t pid, int *status, int options)
+{
+    task_t *child = get_task_by_pid(pid);
+    if (!child || child->parent != current_task)
+        return -1;
+    
+    current_task->state = TASK_WAITING;
+    while (child->state != TASK_ZOMBIE)
+        ;
+    
+    if (status)
+        *status = child->exit_status;
+    
+    return pid;
 }
 
 task_t* get_task_by_pid(pid_t pid)
@@ -463,6 +478,20 @@ void add_child(task_t* parent, task_t* child)
     }
 }
 
+void fork_init_fds(task_t *child, task_t *parent)
+{
+    memcpy(child->fd_table, parent->fd_table, sizeof(parent->fd_table));
+    
+    for (int i = 0; i < MAX_FDS; i++)
+    {
+        if (!child->fd_table[i])
+            continue;
+        memcpy(&child->fd_pointers[i], &parent->fd_pointers[i], sizeof(file_t));
+        child->fd_pointers[i].ref_count++;
+#warning could be an issue as each file_t might have pointers to other structures that also need ref counting, but for now it works as is because we only have tty devices that don't have such pointers, just keep it in mind if you add new types of file_t in the future.
+    }
+}
+
 /* this is of course not ok. */
 void init_standard_fds(task_t *task)
 {
@@ -535,149 +564,64 @@ void create_task(void (*entry)(void), char* name, void (*on_exit)(void))
     add_new_task(task);
 }
 
-pid_t _do_fork(const cpu_state_t *parent_state)
+pid_t _do_fork(iret_regs_t* parent_frame)
 {
-    if (task_index >= MAX_ACTIVE_TASKS)
-    {
-        puts_color("Max number of tasks reached\n", RED);
-        return -1;
-    }
-
-    task_t *parent = current_task;
-    task_t *child = kmalloc(sizeof(task_t));
+    task_t* parent = current_task;
+    task_t* child = kmalloc(sizeof(task_t));
     if (!child)
         return -1;
+    memcpy(child, parent, sizeof(task_t));
 
-    uint32_t live_esp = parent_state->esp_;
-
-
-    /*
-     * Determine the parent's aligned stack top.
-     * (This must match the way create_task() computes it.)
-     */
-    uint32_t *parent_raw_stack = (uint32_t *)parent->stack;
-    uint32_t *parent_stack_top = (uint32_t *)((uint32_t)parent_raw_stack & 0xFFFFFFF0);
-    parent_stack_top += STACK_SIZE / sizeof(uint32_t);
-
-    /* Calculate the used portion of the parent's stack in bytes.
-       (Stack grows downward so: used_bytes = parent_stack_top - live_esp) */
-    size_t used_bytes = (uint32_t)parent_stack_top - live_esp;
-
-    /*
-     * Allocate and align a new user stack for the child.
-     */
-    uint32_t *child_raw_stack = kmalloc(STACK_SIZE);
-    if (!child_raw_stack)
-        return -1;
-    child->stack = (uint32_t)child_raw_stack;
-    uint32_t *child_stack_top = (uint32_t *)((uint32_t)child_raw_stack & 0xFFFFFFF0);
-    child_stack_top += STACK_SIZE / sizeof(uint32_t);
-
-    /*
-     * Compute the child's new ESP so that the same amount of stack is used.
-     * That is, if parent's ESP is X bytes below parent's top,
-     * then child's ESP = child_stack_top - used_bytes.
-     */
-    uint32_t *child_cpu_esp = (uint32_t *)((uint32_t)child_stack_top - used_bytes);
-    memcpy(child_cpu_esp, (void*)live_esp, used_bytes);
-
-    /* 
-     * Copy parent's CPU state (captured earlier) into the child.
-     */
-    memcpy(&child->cpu, parent_state, sizeof(cpu_state_t));
-    child->cpu.esp_ = (uint32_t)child_cpu_esp;
-
-    /* --- Adjust the frame pointer (EBP) chain in the copied stack --- */
-    {
-        uintptr_t parent_top_addr = (uintptr_t)parent_stack_top;
-        uintptr_t child_top_addr  = (uintptr_t)child_stack_top;
-        uintptr_t delta = child_top_addr - parent_top_addr;
-
-        if (child->cpu.ebp >= live_esp && child->cpu.ebp < parent_top_addr)
-        {
-            child->cpu.ebp += delta;
-            uint32_t *cur_ebp = (uint32_t *)child->cpu.ebp;
-            while(cur_ebp &&
-                  ((uintptr_t)cur_ebp >= (uintptr_t)child_cpu_esp) &&
-                  ((uintptr_t)cur_ebp < child_top_addr))
-            {
-                uint32_t saved_ebp = *cur_ebp;
-                if (saved_ebp >= live_esp && saved_ebp < parent_top_addr)
-                {
-                    uint32_t new_val = saved_ebp + delta;
-                    *cur_ebp = new_val;
-                    cur_ebp = (uint32_t *)new_val;
-                }
-                else
-                {
-                    break;
-                }
-            }
-        }
-    }
-    /* --- End EBP fix-up --- */
-
-    /*
-     * Insert a trampoline address on the child's stack.
-     *
-     * When the child is scheduled, the context switch will load its ESP
-     * from child->cpu.esp_. A subsequent "ret" will pop the trampoline address,
-     * jump to fork_trampoline (which sets EAX to 0), and then "ret" to the
-     * original return address.
-     */
-    uint32_t *child_sp = (uint32_t *)child->cpu.esp_;
-    child_sp--;  // reserve space for the trampoline address
-    *child_sp = (uint32_t)fork_trampoline;
-    child->cpu.esp_ = (uint32_t)child_sp;
-
-    /*
-     * Allocate a new kernel stack for the child.
-     * (Here we simply allocate a fresh kernel stack rather than copying the parent's.)
-     */
-    uint32_t *child_kstack_alloc = kmalloc(STACK_SIZE);
-    if (!child_kstack_alloc)
-        return -1;
-    uint32_t *child_kstack_top = (uint32_t *)((uint32_t)child_kstack_alloc & 0xFFFFFFF0);
-    child_kstack_top += STACK_SIZE / sizeof(uint32_t);
-    child->kernel_stack = (uint32_t)child_kstack_top;
-
-    /* Set up the remainder of the child's task structure. */
     child->pid = task_index++;
     child->state = TASK_READY;
-    memcpy(child->name, parent->name, 15);
-    child->name[15] = '\0';
-    child->on_exit = parent->on_exit;
-    child->entry = parent->entry;
     child->parent = parent;
+    child->children = NULL;
 
-    child->uid        = parent->uid;
-    child->euid       = parent->euid;
-    child->gid        = parent->gid;
-    child->is_user    = parent->is_user;
-    child->screen_echo = parent->screen_echo;
-    /* Inherit env (shallow copy — each process should ideally have its own) */
-    child->env        = parent->env;
-    /* Inherit file descriptors */
-    memcpy(child->fd_table,    parent->fd_table,    sizeof(parent->fd_table));
-    memcpy(child->fd_pointers, parent->fd_pointers, sizeof(parent->fd_pointers));
-    /* Increment ref counts on open files */
-    for (int i = 0; i < MAX_FDS; i++)
-        if (child->fd_table[i])
-            child->fd_pointers[i].ref_count++;
+    if (parent->is_user && parent->page_dir)
+        child->page_dir = vmm_clone_directory(parent->page_dir);
 
+    uint32_t *kstack_base = kmalloc(STACK_SIZE);
+    uint32_t *kstack_top = kstack_base + STACK_SIZE / sizeof(uint32_t);
+    child->kernel_stack_base = (uintptr_t)kstack_base;
+    child->kernel_stack = (uintptr_t)kstack_top;
+
+    uint32_t *ksp = kstack_top;
+
+    /* build iret for child process. */
+    *--ksp = parent_frame->ss_user;
+    *--ksp = parent_frame->esp_user;
+    *--ksp = parent_frame->eflags | 0x200;
+    *--ksp = parent_frame->cs;
+    *--ksp = parent_frame->eip;
+
+    *--ksp = 0; /* eax = 0 for child */
+    *--ksp = parent_frame->ecx;
+    *--ksp = parent_frame->edx;
+    *--ksp = parent_frame->ebx;
+    *--ksp = 0;
+    *--ksp = parent_frame->ebp;
+    *--ksp = parent_frame->esi;
+    *--ksp = parent_frame->edi;
+
+
+    child->cpu.esp_ = (uint32_t)ksp;
+        
+    child->stub_page = 0;
+    child->stack = 0;
+
+    fork_init_fds(child, parent);
     add_child(parent, child);
     init_signals(child);
-
     add_new_task(child);
-    // kprintf("Forked new task: child pid %d, parent pid %d\n", child->pid, parent->pid);
+
+    kprintf("Forked new task '%s' with PID %d from parent PID %d\n", child->name, child->pid, parent->pid);
+
     return child->pid;
 }
 
-pid_t _fork(void)
+pid_t _fork(iret_regs_t* parent_frame)
 {
-    cpu_state_t state;
-    capture_cpu_state(&state);
-    return _do_fork(&state);
+    return _do_fork(parent_frame);
 }
 
 void scheduler_init(void)
@@ -790,6 +734,7 @@ void socket_2()
     char* err_str = "Error reading\n";
     char* read_str = "Read: ";
 
+    sys_sleep(10);
     sock = sys_connect("/foo/bar");
     if (sock < 0)
     {
@@ -1014,6 +959,7 @@ void create_user_task_at(uint32_t entry_addr, char *name, void (*on_exit)(void),
     init_signals(task);
 
     add_new_task(task);
+    kprintf("Created user task '%s' with PID %d at entry point %p\n", name, task->pid, entry_addr);
 }
 
 void task_wait()

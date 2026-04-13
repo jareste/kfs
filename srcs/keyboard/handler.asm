@@ -52,7 +52,11 @@ extern timer_schedule
 global syscall_handler_asm
 syscall_handler_asm:
     pusha
+    
+    push esp
     call syscall_handler
+    add esp, 4
+
     mov [esp + 28], eax
 
     push esp

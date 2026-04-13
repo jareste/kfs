@@ -4,6 +4,7 @@
 #include "../utils/stdint.h"
 #include "../keyboard/signals.h"
 #include "../utils/utils.h"
+#include "../syscalls/syscalls.h"
 #include "cpu_state.h"
 #include "env.h"
 #include "../ide/ext2_fileio.h"
@@ -75,10 +76,11 @@ void scheduler_init(void);
 task_t* get_task_by_pid(pid_t pid);
 task_t* get_current_task();
 void kill_task();
+pid_t _waitpid(pid_t pid, int *status, int options);
 
 void _exit(int status);
 
-pid_t _fork(void);
+pid_t _fork(iret_regs_t* parent_frame);
 
 void start_user();
 #warning "If this is meant to be used, ensure the definition of externs"
