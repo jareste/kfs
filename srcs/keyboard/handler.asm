@@ -56,30 +56,22 @@ syscall_handler_asm:
     push esp
     call syscall_handler
     add esp, 4
-
     mov [esp + 28], eax
-
     push esp
     call timer_schedule
     add esp, 4
-
     test eax, eax
     jz .no_switch
-
     mov esp, eax
-
 .no_switch:
     mov eax, [esp + 36]
     and eax, 0x3
     cmp eax, 3
     jne .do_iret
-
     mov ax, 0x2B
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
-
 .do_iret:
     popa
     iret
@@ -140,32 +132,25 @@ global irq_handler_0
 irq_handler_0:
     cli
     pusha
-
     mov al, 0x20
     out 0x20, al
-
     push esp
     call timer_schedule
     add esp, 4
-
     test eax, eax
-    jz .no_switch
-
+    jz .restore_segs
     mov esp, eax
 
-.no_switch:
-    ; read CS from iret frame (pusha 32 + EIP 4 = CS 36)
+    jmp .restore_segs
+.restore_segs:
     mov eax, [esp + 36]
     and eax, 0x3
     cmp eax, 3
     jne .do_iret
-
     mov ax, 0x2B
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
-
 .do_iret:
     popa
     iret

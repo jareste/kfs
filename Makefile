@@ -141,13 +141,13 @@ format: crdisk
 	# sudo mkdir mnt_ext2/etc
 	# sudo cp users.config mnt_ext2/etc/.
 	sudo make -C uspace/stdlib
-	sudo gcc -m32 -static -nostdlib -nostartfiles -ffreestanding -fno-pic -fno-pie -Wl,--build-id=none -o hello test/hello.c
-	sudo gcc -m32 -static -nostdlib -nostartfiles -ffreestanding -fno-pic -fno-pie -Wl,--build-id=none -o hello2 test/hello2.c uspace/stdlib/libkfs_stdlib.a
+	gcc -m32 -nostdlib -static -I/workspaces/kfs/sysroot/include /workspaces/kfs/sysroot/lib/crt1.o /workspaces/kfs/sysroot/lib/crti.o test/hello.c /workspaces/kfs/sysroot/lib/libc.a /workspaces/kfs/sysroot/lib/crtn.o -o hello
+	gcc -m32 -nostdlib -static -I/workspaces/kfs/sysroot/include /workspaces/kfs/sysroot/lib/crt1.o /workspaces/kfs/sysroot/lib/crti.o test/hello2.c /workspaces/kfs/sysroot/lib/libc.a /workspaces/kfs/sysroot/lib/crtn.o -o hello2
 	sudo cp hello mnt_ext2/.
 	sudo cp hello2 mnt_ext2/.
 	sudo make -C uspace/programs/ushell
 	sudo cp uspace/programs/ushell/ushell mnt_ext2/.
-	sudo gcc -m32 -c -ffreestanding -fno-builtin -fno-pic -fno-pie -fno-stack-protector -nostdlib -O0  uspace/modules/kb_mod.c -o kb_mod.o
+	gcc -m32 -c -ffreestanding -fno-builtin -fno-pic -fno-pie -fno-stack-protector -nostdlib -O0  uspace/modules/kb_mod.c -o kb_mod.o
 	sudo cp kb_mod.o mnt_ext2/.
 	sudo cp users.config mnt_ext2/.
 	sudo rm -rf lost+found

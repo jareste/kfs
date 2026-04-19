@@ -77,6 +77,39 @@ void gdt_set_entry(int index, uint32_t base, uint32_t limit, uint8_t access, uin
     gdt[index].access = access;
 }
 
+void print_gdt8()
+{
+    #include "../tasks/task.h"
+    uint32_t tls_base = gdt[8].base_low | 
+                        ((uint32_t)gdt[8].base_middle << 16) | 
+                        ((uint32_t)gdt[8].base_high << 24);
+    kprintf("GDT[8] base=%x access=%x\n", tls_base, gdt[8].access);
+    kprintf("current_task->tls_base=%x\n", get_current_task()->tls_base);
+
+    uint32_t limit = gdt[8].limit_low | 
+                    (((uint32_t)gdt[8].granularity & 0x0F) << 16);
+    uint32_t gran = gdt[8].granularity >> 4;
+    kprintf("GDT[8] limit=%x gran=%x\n", limit, gran);
+    uint32_t gs_zero;
+    __asm__ volatile(
+        "push %%gs\n"
+        "mov %1, %%gs\n"
+        "mov %%gs:0x0, %0\n"
+        "pop %%gs\n"
+        : "=r"(gs_zero)
+        : "r"((uint32_t)0x43)
+    );
+    kprintf("gs:0x0 = %x\n", gs_zero);
+    uint32_t tls_va = 0x804d000;
+    uint32_t di = tls_va >> 22;
+    uint32_t ti = (tls_va >> 12) & 0x3FF;
+    page_directory_t *dir = get_current_task()->page_dir;
+    uint32_t pde = dir->entries[di];
+    page_table_t *tbl = (page_table_t*)(pde & 0xFFFFF000);
+    uint32_t pte = tbl->entries[ti];
+    kprintf("PDE=%x PTE=%x\n", pde, pte);
+}
+
 void gdt_init()
 {
     /* NULL */
@@ -102,6 +135,9 @@ void gdt_init()
 
     /* task state segment */
     gdt_set_entry(7, (uint32_t)&tss, sizeof(tss) - 1, 0x89, 0x40);
+
+    /* TLS - to be filled on set_thread_area */
+    gdt_set_entry(8, 0, 0, 0, 0);
 
     register_gdt();
 }

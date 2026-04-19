@@ -6,6 +6,8 @@
 #include "../keyboard/signals.h"
 #include "../keyboard/keyboard.h"
 #include "../time/time.h"
+#include "../panic/kpanic.h"
+#include "../gdt/gdt.h"
 
 typedef int (*syscall_handler_6_t)(uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4, uint32_t arg5, uint32_t arg6);
 typedef int (*syscall_handler_5_t)(uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4, uint32_t arg5);
@@ -44,6 +46,42 @@ typedef struct
     uint8_t num_args;
     ret_value_size ret_value_entry;
 } syscall_entry_t;
+
+struct user_desc
+{
+    unsigned int entry_number;
+    unsigned int base_addr;
+    unsigned int limit;
+    unsigned int seg_32bit:1;
+    unsigned int contents:2;
+    unsigned int read_exec_only:1;
+    unsigned int limit_in_pages:1;
+    unsigned int seg_not_present:1;
+    unsigned int useable:1;
+};
+
+syscall_entry_t syscall_table[SYS_MAX_SYSCALL];
+
+int sys_set_thread_area(struct user_desc *u_info)
+{
+    if (u_info->entry_number == (unsigned)-1)
+        u_info->entry_number = TLS_GDT_ENTRY;
+
+    gdt_set_entry(TLS_GDT_ENTRY, u_info->base_addr, u_info->limit, 0xF2,
+                  u_info->limit_in_pages ? 0xC0 : 0x40);
+    register_gdt();
+
+    get_current_task()->tls_base = u_info->base_addr;
+
+    uint16_t sel = (TLS_GDT_ENTRY * 8) + 3;
+    __asm__ volatile ("mov %0, %%gs" :: "r"(sel));
+    return 0;
+}
+
+int sys_set_tid_address(int *tidptr)
+{
+    return get_current_task()->pid;
+}
 
 int sys_exit(int status)
 {
@@ -150,7 +188,13 @@ pid_t sys_waitpid(pid_t pid, int *status, int options)
     return _waitpid(pid, status, options);
 }
 
-syscall_entry_t syscall_table[SYS_MAX_SYSCALL];
+int sys_rt_sygprocmask(int how, const uint32_t *set, uint32_t *oldset)
+{
+    (void)how;
+    (void)set;
+    (void)oldset;
+    return 0;
+}
 
 int syscall_handler(iret_regs_t* reg)
 {
@@ -170,6 +214,7 @@ int syscall_handler(iret_regs_t* reg)
     if (syscall_number >= SYS_MAX_SYSCALL || syscall_table[syscall_number].handler.handler == NULL)
     {
         kprintf("Unknown syscall: %d\n", syscall_number);
+        kpanic("Invalid syscall number", 1);
         return -1;
     }
 
@@ -297,4 +342,27 @@ void init_syscalls()
         .handler.handler = (void*)sys_time,
     };
 
+    syscall_table[SYS_SET_THREAD_AREA] = (syscall_entry_t){
+        .ret_value_entry = RET_INT,
+        .num_args = 1,
+        .handler.handler = (void*)sys_set_thread_area,
+    };
+
+    syscall_table[SYS_SET_TID_ADDRESS] = (syscall_entry_t){
+        .ret_value_entry = RET_INT,
+        .num_args = 1,
+        .handler.handler = (void*)sys_set_tid_address,
+    };
+
+    syscall_table[SYS_EXIT_GROUP] = (syscall_entry_t){
+        .ret_value_entry = RET_VOID,
+        .num_args = 1,
+        .handler.handler = (void*)sys_exit, /* TODO maybe create sys_exit_group ?*/
+    };
+
+    syscall_table[SYS_SIGPROCMASK] = (syscall_entry_t){
+        .ret_value_entry = RET_INT,
+        .num_args = 3,
+        .handler.handler = (void*)sys_rt_sygprocmask,
+    };
 }

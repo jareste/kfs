@@ -5,8 +5,10 @@
 
 /* info from: https://wiki.osdev.org/GDT_Tutorial */
 /* To consider: https://samypesse.gitbook.io/how-to-create-an-operating-system/chapter-6 */
-#define GDT_ENTRIES 8
+#define GDT_ENTRIES 9
 #define GDT_ADDRESS 0x00000800
+
+#define TLS_GDT_ENTRY 8
 
 #define SEG_DESCTYPE(x)  ((x) << 0x04) // Descriptor type (0 for system, 1 for code/data)
 #define SEG_PRES(x)      ((x) << 0x07) // Present

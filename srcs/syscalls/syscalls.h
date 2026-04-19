@@ -108,7 +108,11 @@ typedef enum {
     SYS_NANOSLEEP = 170,
     SYS_SLEEP = 171,
     // SYS_TIME = 174,
-    SYS_MAX_SYSCALL = 175,
+    SYS_SIGPROCMASK = 175,
+    SYS_SET_THREAD_AREA = 243,
+    SYS_EXIT_GROUP = 252,
+    SYS_SET_TID_ADDRESS = 258,
+    SYS_MAX_SYSCALL = 259,
 
 } syscalls_num;
 

@@ -1,4 +1,4 @@
-void _start() {
+void main() {
     const char msg[] = "Hello World\n";
     asm volatile (
         "movl $4, %%eax\n"     /* sys_write (i386) */

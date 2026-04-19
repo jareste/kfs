@@ -18,10 +18,13 @@ void init_queue(Queue *q)
 
 void enqueue(Queue *q, int pid, int status)
 {
+    data_t foo;
+
     if (is_full(q))
     {
         puts_color("Queue is full\n", RED);
-        return;
+        dequeue(q, &foo);
+        // return;
     }
     q->data[q->rear].pid = pid;
     q->data[q->rear].status = status;

@@ -7,6 +7,7 @@ void tty_write_ch(tty_device_t *tty, char c)
 {
     tty->buffer[tty->write_pos] = c;
     tty->write_pos = (tty->write_pos + 1) % TTY_BUFFER_SIZE;
+    putc(c); /* to be removed */
 }
 
 void tty_delete_ch(tty_device_t *tty)

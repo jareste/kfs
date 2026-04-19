@@ -87,9 +87,14 @@ void vmm_map_page(page_directory_t *dir, uint32_t virt, uint32_t phys, uint32_t 
     uint32_t    di    = VMM_DIR_INDEX(virt);
     uint32_t    ti    = VMM_TABLE_INDEX(virt);
     page_table_t *tbl = get_or_create_table(dir, di, flags);
-
+    
     if (tbl->entries[ti] & PAGE_PRESENT)
-        kpanic("VMM: vmm_map_page - page already mapped", 1);
+    {
+        tbl->entries[ti] = phys | (flags & 0xFFF) | PAGE_PRESENT;
+        if (current_dir == dir)
+            tlb_flush_page(virt);
+        return;
+    }
 
     if (flags & PAGE_USER)
         dir->entries[di] |= PAGE_USER;
@@ -183,7 +188,8 @@ page_directory_t* vmm_clone_directory(page_directory_t *src)
         page_table_t *src_table = (page_table_t*)(src->entries[i] & PAGE_FRAME_MASK);
 
         bool should_copy = (virt_start >= 0x08000000 && virt_start < 0x0C000000) ||
-                           (virt_start >= 0xD0000000 && virt_start < 0xF0000000);
+                   (virt_start >= 0xBF000000 && virt_start < 0xC0000000) || // stack + stub
+                   (virt_start >= 0xD0000000 && virt_start < 0xF0000000);
 
         if (should_copy)
         {

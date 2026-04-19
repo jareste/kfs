@@ -152,11 +152,14 @@ void free_finished_tasks()
     free_envp(to_free);
     kfree((void*)to_free->kernel_stack_base);
     if (to_free->is_user)
-        vfree((void*)to_free->stack);
+    {
+        // vfree((void*)to_free->stack);
+        /* do nothing */
+    }
     else
         kfree((void*)to_free->stack);
-    if (to_free->stub_page)
-        vfree((void*)to_free->stub_page);
+    // if (to_free->stub_page)
+    //     vfree((void*)to_free->stub_page);
 #warning "This might not be working, check it out"
     if (to_free->page_dir)
     {
@@ -286,22 +289,6 @@ void check_wake_up(task_t* task)
     }
 }
 
-// task_t* get_next_task()
-// {
-//     task_t *current = current_task->next;
-//     check_wake_up(current);
-//     while (current->state == TASK_WAITING || current->state == TASK_SLEEPING)
-//     {
-//         current = current->next;
-//         check_wake_up(current);
-//         if (current->pid == 0)
-//         {
-//             current = current->next;
-//         }
-//     }
-//     return current;
-// }
-
 task_t* get_next_task(void)
 {
     task_t *start   = current_task->next;
@@ -358,6 +345,7 @@ uint32_t timer_schedule(uint32_t *iframe_esp)
     }
 
     task_t *prev = current_task;
+    __asm__ volatile("mov %%gs, %0" : "=r"(prev->gs));
 
     prev->cpu.esp_ = (uint32_t)iframe_esp;
 
@@ -368,12 +356,18 @@ uint32_t timer_schedule(uint32_t *iframe_esp)
     tss_set_stack(next->kernel_stack);
     set_active_env(next->env);
 
-#warning "This might cause problems as by default tasks would not have page dir, so they would be switched to kernel dir, but maybe it's not a problem as kernel tasks don't need it. Just keep it in mind."
     if (next->page_dir)
         vmm_switch_directory(next->page_dir);
     else
         vmm_set_kernel_dir();
 
+    if (next->tls_base)
+    {
+        gdt_set_entry(TLS_GDT_ENTRY, next->tls_base, 0xFFFFF, 0xF2, 0xC0);
+        register_gdt();
+    }
+    
+    __asm__ volatile("mov %0, %%gs" :: "r"(next->gs));
     inside_timer_schedule = 0;
     return next->cpu.esp_;
 }
@@ -567,6 +561,11 @@ void create_task(void (*entry)(void), char* name, void (*on_exit)(void))
 pid_t _do_fork(iret_regs_t* parent_frame)
 {
     task_t* parent = current_task;
+    uint32_t current_gs;
+
+    __asm__ volatile("mov %%gs, %0" : "=r"(current_gs));
+    parent->gs = current_gs;
+
     task_t* child = kmalloc(sizeof(task_t));
     if (!child)
         return -1;
@@ -608,6 +607,7 @@ pid_t _do_fork(iret_regs_t* parent_frame)
         
     child->stub_page = 0;
     child->stack = 0;
+    child->tls_base = parent->tls_base;
 
     fork_init_fds(child, parent);
     add_child(parent, child);
@@ -848,46 +848,11 @@ void task_read()
 
 }
 
-/* It needs to get a new page directory if i would want it to work again. */
-void create_user_code_task(char *name)
-{
-    uint8_t *code_page = vmalloc(PAGE_SIZE);
-    uint8_t *data_page = vmalloc(PAGE_SIZE);
-
-    uint32_t code_pa = vmm_get_physical(vmm_current_directory(), (uint32_t)code_page);
-    uint32_t data_pa = vmm_get_physical(vmm_current_directory(), (uint32_t)data_page);
-
-    vmm_unmap_page(vmm_current_directory(), (uint32_t)code_page);
-    vmm_unmap_page(vmm_current_directory(), (uint32_t)data_page);
-    vmm_map_page(vmm_current_directory(), (uint32_t)code_page, code_pa, PAGE_USER_RW);
-    vmm_map_page(vmm_current_directory(), (uint32_t)data_page, data_pa, PAGE_USER_RW);
-
-    uint32_t *dir_entries = (uint32_t *)vmm_current_directory();
-    uint32_t dir_idx = (uint32_t)code_page >> 22;
-    uint32_t tbl_phys = dir_entries[dir_idx] & 0xFFFFF000;
-    uint32_t *tbl = (uint32_t *)tbl_phys;
-    uint32_t tbl_idx = ((uint32_t)code_page >> 12) & 0x3FF;
-    uint32_t pde_flags = dir_entries[dir_idx] & 0xFFF;
-    kprintf("PDE flags for code_page: %x\n", pde_flags);
-    kprintf("PTE flags for code_page: %x\n", tbl[tbl_idx] & 0xFFF);
-
-    memcpy(data_page, user_msg, sizeof(user_msg));
-    memcpy(code_page, user_code, sizeof(user_code));
-
-
-    kprintf("code bytes at %p: ", code_page);
-    for (int i = 0; i < 10; i++)
-    {
-        put_2_hex(code_page[i]);
-        putc(' ');
-    }
-    kprintf("\n");
-    *(uint32_t *)(code_page + 11) = (uint32_t)data_page;
-
-    kprintf("ecx patch at offset 11: %x\n", *(uint32_t*)(code_page + 11));
-
-    create_user_task_at((uint32_t)code_page, name, NULL, NULL);
-}
+/* think where to place it */
+#define USER_STACK_TOP   0xC0000000u
+#define USER_STACK_SIZE  (1 * 1024 * 1024)  // 1MB
+#define USER_STACK_BASE  (USER_STACK_TOP - USER_STACK_SIZE)
+#define USER_STUB_ADDR   0xBF000000u
 
 void create_user_task_at(uint32_t entry_addr, char *name, void (*on_exit)(void), page_directory_t* _task_dir)
 {
@@ -897,70 +862,65 @@ void create_user_task_at(uint32_t entry_addr, char *name, void (*on_exit)(void),
     uint32_t *kernel_stack_base = kmalloc(STACK_SIZE);
     uint32_t *kernel_stack_top  = kernel_stack_base + STACK_SIZE / sizeof(uint32_t);
 
-    task->page_dir = _task_dir;
+    page_directory_t *task_dir = _task_dir ? _task_dir : vmm_current_directory();
+    task->page_dir = task_dir;
 
-    page_directory_t *task_dir;
-    if (_task_dir)
-        task_dir = _task_dir;
-    else
-        task_dir = vmm_current_directory();
-
-    uint32_t *user_stack_base = vmalloc(USER_STACK_SIZE);
-    uint32_t user_pages = PAGE_ALIGN(USER_STACK_SIZE) / PAGE_SIZE;
-    for (uint32_t i = 0; i < user_pages; i++)
+    for (uint32_t va = USER_STACK_BASE; va < USER_STACK_TOP; va += PAGE_SIZE)
     {
-        uint32_t va = (uint32_t)user_stack_base + i * PAGE_SIZE;
-        uint32_t pa = vmm_get_physical(task_dir, va);
-        vmm_unmap_page(task_dir, va);
+        uint32_t pa = pmm_alloc_frame();
         vmm_map_page(task_dir, va, pa, PAGE_USER_RW);
     }
 
-    /* Create exit stub for enforcing all programs to exit cleanly */
-    uint8_t *stub_page = vmalloc(PAGE_SIZE);
-    uint32_t stub_pa = vmm_get_physical(task_dir, (uint32_t)stub_page);
-    vmm_unmap_page(task_dir, (uint32_t)stub_page);
-    vmm_map_page(task_dir, (uint32_t)stub_page, stub_pa, PAGE_USER_RW);
+    uint32_t stub_pa = pmm_alloc_frame();
+    vmm_map_page(task_dir, USER_STUB_ADDR, stub_pa, PAGE_USER_RW);
 
-    uint32_t *dir = (uint32_t*)task_dir;
-    dir[(uint32_t)stub_page >> 22] |= PAGE_USER;
-    __asm__ __volatile__("invlpg (%0)" : : "r"((uint32_t)stub_page) : "memory");
+    page_directory_t *prev_dir = vmm_current_directory();
+    vmm_switch_directory(task_dir);
 
-    memcpy(stub_page, exit_stub, sizeof(exit_stub));
+    memcpy((void*)USER_STUB_ADDR, exit_stub, sizeof(exit_stub));
 
-    task->stub_page = (uintptr_t)stub_page;
+    uint32_t *usp = (uint32_t*)USER_STACK_TOP;
+    usp = (uint32_t*)((uint32_t)usp & ~0xF);
 
-    uint32_t *usp = user_stack_base + USER_STACK_SIZE / sizeof(uint32_t);
-    *--usp = (uint32_t)stub_page;
+    *--usp = 0; /* auxv AT_NULL value */
+    *--usp = 0; /* auxv AT_NULL type */
+    *--usp = 0; /* envp NULL terminator */
+    *--usp = 0; /* argv NULL terminator */
+    *--usp = 0; /* argc = 0 */
+
+    vmm_switch_directory(prev_dir);
 
     uint32_t *ksp = kernel_stack_top;
-    *--ksp = 0x2B; /* SS */
-    *--ksp = (uint32_t)usp; /* ESP */
-    *--ksp = 0x202; /* EFLAGS */
-    *--ksp = 0x23; /* CS ring 3*/
-    *--ksp = entry_addr; /* EIP */
+    *--ksp = 0x2B; /* SS (user) */
+    *--ksp = (uint32_t)usp; /* points to argc */
+    *--ksp = 0x202; /* EFLAGS with IF=1 to enable interrupts when the task starts running */
+    *--ksp = 0x23; /* CS for ring 3 */
+    *--ksp = entry_addr;        // EIP
 
-    for (uint32_t i = 0; i < 8; i++)
+    for (int i = 0; i < 8; i++)
         *--ksp = 0;
 
-    task->cpu.esp_     = (uint32_t)ksp;
+    task->cpu.esp_ = (uint32_t)ksp;
     task->kernel_stack = (uintptr_t)kernel_stack_top;
     task->kernel_stack_base = (uintptr_t)kernel_stack_base;
-    task->stack        = (uintptr_t)user_stack_base;
-    task->pid          = task_index++;
-    task->state        = TASK_READY;
-    task->is_user      = true;
-    task->on_exit      = on_exit;
+    task->stack = USER_STACK_BASE;
+    task->stub_page = USER_STUB_ADDR;
+    task->pid = task_index++;
+    task->state = TASK_READY;
+    task->is_user = true;
+    task->on_exit = on_exit;
     task->uid = 1000; task->euid = 1000; task->gid = 1000;
-    task->screen_echo  = true;
+    task->screen_echo = true;
+
     memcpy(task->name, name, strlen(name) > 15 ? 15 : strlen(name));
     task->name[15] = '\0';
+
     memset(task->fd_table, 0, sizeof(task->fd_table));
     init_standard_fds(task);
     init_signals(task);
-
     add_new_task(task);
-    kprintf("Created user task '%s' with PID %d at entry point %p\n", name, task->pid, entry_addr);
 }
+
 
 void task_wait()
 {
@@ -998,18 +958,15 @@ void start_foo_tasks(void)
     create_task(task_read, "task_read", NULL);
     create_task(socket_1, "socket_1", NULL);
     create_task(socket_2, "socket_2", NULL);
-    // create_user_code_task("user_code_task");
     exec_bin("/hello");
     exec_bin("/hello");
     exec_bin("/hello2");
     exec_bin("/hello2");
     exec_bin("/hello2");
     exec_bin("/hello2");
-    exec_bin("/ushell");
     insmod("/kb_mod.o");
 
     to_free = NULL;
-    // kprintf("current_task: %p\n", current_task);
 }
 
 /* ################################################################### */

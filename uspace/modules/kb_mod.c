@@ -1,5 +1,6 @@
 // gcc -m32 -c -ffreestanding -fno-builtin -fno-pic -fno-pie -fno-stack-protector -nostdlib -O0  uspace/modules/kb_mod.c -o kb_mod.o
 
+#include "../stdlib/kfs_stdlib.h"
 #include "../../srcs/modules/modules.h"
 
 static void kbd_on_key(int key, int state);

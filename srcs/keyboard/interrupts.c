@@ -69,6 +69,17 @@ void page_fault_handler(registers* regs, error_state* stack)
         kprintf("EFLAGS=%x ESP_user=%x SS_user=%x\n",
                ustack->eflags, ustack->esp_user, ustack->ss_user);
     }
+    uint32_t cr3;
+    __asm__ __volatile__("mov %%cr3, %0" : "=r"(cr3));
+    kprintf("CR3=%x fault_addr=%x\n", cr3, faulting_address);
+    uint16_t fs, gs;
+    __asm__ volatile("mov %%fs, %0" : "=r"(fs));
+    __asm__ volatile("mov %%gs, %0" : "=r"(gs));
+    kprintf("FS=%x GS=%x\n", fs, gs);
+    kprintf("EAX=%x EBX=%x ECX=%x EDX=%x\n", 
+            regs->eax, regs->ebx, regs->ecx, regs->edx);
+    kprintf("ESI=%x EDI=%x EBP=%x\n",
+            regs->esi, regs->edi, regs->ebp);
 
     kprintf("EIP at fault: %x\n", stack->eip);
     kprintf("ECX at fault: %x\n", regs->ecx);
@@ -105,8 +116,16 @@ void page_fault_handler(registers* regs, error_state* stack)
 
     kprintf("\nKernel uptime: %d\n", get_kuptime());
 
+    print_gdt8();
 
+    uint32_t tls_base = get_current_task()->tls_base;
+    if (tls_base)
+    {
+        uint32_t *tls = (uint32_t*)tls_base;
+        kprintf("TLS[0]=0x%x TLS[1]=0x%x TLS[2]=0x%x\n", tls[0], tls[1], tls[2]);
+    }
     kprintf("Killing task %d due to page fault.\n", task->pid);
+    while (1) {}
     _exit(-1);  // or call kill_task() as appropriate
 }
 /* PAGE FAULT HANDLER */
@@ -245,6 +264,7 @@ void init_interrupts()
     idt_set_gate(47, (uint32_t)irq_handler_15); /* Secondary ATA Hard Disk */
 
     idt_set_gate_user(0x30, (uint32_t)syscall_handler_asm);
+    idt_set_gate_user(0x80, (uint32_t)syscall_handler_asm);
 
     register_idt();
     ide_init();

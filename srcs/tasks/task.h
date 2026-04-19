@@ -38,6 +38,8 @@ typedef struct task_struct
     page_directory_t* page_dir;
 
     env_hashtable_t *env; /* should not be used from the kernel itself (? */
+    uint32_t gs; /* Added to save/restore GS segment register */
+    uint32_t tls_base;
 
     struct task_struct *parent;
     struct task_struct *next;

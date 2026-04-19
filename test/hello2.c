@@ -1,10 +1,14 @@
-#include "../uspace/stdlib/kfs_stdlib.h"
-void _start()
+// #include "../uspace/stdlib/kfs_stdlib.h"
+#include <unistd.h>
+#include <stdlib.h>
+
+void main()
 {
     const char msg[] = "Hello2222 World\n";
     write(1, msg, sizeof(msg) - 1);
-    int pid = fork();
-    // int pid = 1;
+    // exit(0);
+    int pid = 0;
+    pid = fork();
     if (pid == 0)
     {
         /* Child process */
@@ -24,6 +28,5 @@ void _start()
         const char error_msg[] = "Fork failed!\n";
         write(1, error_msg, sizeof(error_msg) - 1);
     }
-    get_pid();
     exit(0);
 }
