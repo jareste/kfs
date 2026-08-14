@@ -536,7 +536,6 @@ ext2_FILE *ext2_fopen(const char *path, const char *mode)
     {
         if (!allow_write)
         {
-            kprintf("ext2_fopen: file not found '%s'\n", path);
             return NULL;
         }
         
@@ -1820,6 +1819,24 @@ static void cmd_tfdopen()
     sys_close(fd, get_current_task());
 }
 
+static void ext2_write_file_if_missing(const char *path, const char *content)
+{
+    uint32_t inode_num;
+    ext2_FILE *f;
+
+    if (ext2_resolve_path(path, &inode_num) == 0)
+        return; /* already present */
+
+    f = ext2_fopen(path, "w");
+    if (!f)
+    {
+        kprintf("Failed to create %s\n", path);
+        return;
+    }
+    ext2_fwrite(f, content, strlen(content));
+    ext2_fclose(f);
+}
+
 void create_unix_dirs()
 {
     ext2_cmd_mkdir("bin");
@@ -1835,6 +1852,13 @@ void create_unix_dirs()
     ext2_cmd_mkdir("run");
     ext2_cmd_mkdir("etc");
     ext2_cmd_mv("users.config", "/etc/users.config");
+
+    ext2_write_file_if_missing("/etc/passwd",
+        "root:x:0:0:root:/root:/bin/sh\n"
+        "user:x:1000:1000:user:/home:/bin/sh\n");
+    ext2_write_file_if_missing("/etc/group",
+        "root:x:0:\n"
+        "user:x:1000:\n");
 }
 
 void test_fileio()
