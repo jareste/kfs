@@ -17,4 +17,6 @@ typedef struct
 } tty_device_t;
 
 void tty_delete_ch(tty_device_t *tty);
+int tty_keyboard_input(void *fp, const char *buf, size_t count);
+int open_tty_device(void *tty_device, file_t* f);
 #endif

@@ -1,6 +1,8 @@
 #ifndef SYSCALLS_H
 #define SYSCALLS_H
 #include "../keyboard/idt.h"
+#include "../keyboard/signals.h"
+#include "../time/time.h"
 
 // #define SYS_EXIT    0
 // #define SYS_WRITE   1
@@ -99,21 +101,38 @@ typedef enum {
     SYS_MUNMAP = 91,
     SYS_WAIT4 = 114,
     // ...
+    SYS_UNAME = 122,
+    SYS_MPROTECT = 125,
     SYS_INIT_MODULE = 128,
     SYS_DELETE_MODULE = 129,
     SYS_GET_KERNEL_SYMS = 130,
     SYS_QUERY_MODULE = 131,
     SYS_QUOTACTL = 132,
+    SYS_WRITEV = 146,
     SYS_GETTIMEOFDAY = 169,
     SYS_NANOSLEEP = 170,
     SYS_SLEEP = 171,
-    // SYS_TIME = 174,
+    SYS_RT_SIGACTION = 174,
     SYS_SIGPROCMASK = 175,
+    SYS_GETCWD = 183,
+    SYS_UGETRLIMIT = 191,
+    SYS_MMAP2 = 192,
+    SYS_GETUID32 = 199,
+    SYS_GETGID32 = 200,
+    SYS_GETEUID32 = 201,
+    SYS_SETUID32 = 213,
+    SYS_SETGID32 = 214,
+    SYS_GETRUSAGE = 217,
+    SYS_FADVISE64 = 221,
     SYS_SET_THREAD_AREA = 243,
     SYS_EXIT_GROUP = 252,
     SYS_SET_TID_ADDRESS = 258,
-    SYS_MAX_SYSCALL = 259,
-
+    SYS_READLINKAT = 305,
+    SYS_SET_ROBUST_LIST = 311,
+    SYS_GETRANDOM = 355,
+    SYS_STATX = 383,
+    SYS_RSEQ = 386,
+    SYS_MAX_SYSCALL = 404
 } syscalls_num;
 
 typedef struct __attribute__((packed))
@@ -136,5 +155,11 @@ typedef struct __attribute__((packed))
 int syscall_handler(iret_regs_t* reg);
 
 void init_syscalls();
+
+int sys_get_pid();
+int sys_kill(uint32_t pid, uint32_t signal);
+int sys_signal(uint32_t pid, signal_handler_t hand);
+void sys_sleep(uint32_t seconds);
+time_t sys_time(time_t* tloc);
 
 #endif // SYSCALLS_H

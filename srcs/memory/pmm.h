@@ -8,8 +8,12 @@
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
+#ifndef PAGE_SIZE
 #define PAGE_SIZE       4096            /* 4 KB pages                  */
+#endif
+#ifndef PAGE_ALIGN
 #define PAGE_ALIGN(a)   (((a) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1))
+#endif
 
 /* ------------------------------------------------------------------ */
 /*  Public API                                                         */

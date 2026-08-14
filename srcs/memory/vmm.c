@@ -54,7 +54,6 @@ static inline void tlb_flush_all(void)
 static page_table_t *get_or_create_table(page_directory_t *dir, uint32_t dir_idx, uint32_t flags)
 {
     page_table_t *table;
-    int32_t i;
     uint32_t phys;
     uint32_t entry = dir->entries[dir_idx];
 

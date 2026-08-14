@@ -57,6 +57,7 @@ void disable_interrupts(void);
 void init_interrupts();
 
 void idt_set_gate(int idx, uint32_t base);
+void idt_set_gate_user(int idx, uint32_t base);
 void register_idt();
 
 void init_page_signals();

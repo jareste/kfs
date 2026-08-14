@@ -1,6 +1,7 @@
 #include "ext2.h"
 #include "../ide/ide.h"
 #include "../memory/memory.h"
+#include "../memory/kmalloc.h"
 #include "../utils/utils.h"
 #include "../utils/stdint.h"
 #include "../kshell/kshell.h"
@@ -60,7 +61,6 @@ static void split_path(const char *full_path, char *out_parent, char *out_name)
         strcpy(out_name, ".");
     }
 }
-
 
 static void ext2_read_block(uint32_t block, void *buf)
 {
@@ -593,7 +593,8 @@ int ext2_fclose(ext2_FILE *stream)
 
 size_t ext2_fread(ext2_FILE *stream, void *ptr, size_t size)
 {
-    uint8_t blockbuf[EXT2_BLOCK_SIZE];
+    // uint8_t blockbuf[EXT2_BLOCK_SIZE];
+    uint8_t *blockbuf = kmalloc(EXT2_BLOCK_SIZE);
     size_t bytes_read;
     uint8_t *out;
     size_t remain;
@@ -615,6 +616,26 @@ size_t ext2_fread(ext2_FILE *stream, void *ptr, size_t size)
     if (remain < size)
         size = remain;
 
+
+    int test_yes = 0;
+    if (test_yes == 3)
+    {
+    kprintf("[EXT2] inode=%d size=%d\n", stream->inode_num, stream->inode.i_size);
+    kprintf("[EXT2] i_block: ");
+    for (int i = 0; i < 15; i++)
+        kprintf("%d ", stream->inode.i_block[i]);
+    kprintf("\n");
+
+    kprintf("[EXT2] i_blocks=%d (en unidades de 512 bytes = %d KB)\n",
+        stream->inode.i_blocks,
+        stream->inode.i_blocks / 2);
+
+        uint32_t *test_indirect = kmalloc(EXT2_BLOCK_SIZE);
+        ext2_read_block(stream->inode.i_block[12], (uint8_t*)test_indirect);
+        kprintf("[EXT2] indirect block 220, first entries: %d %d %d %d\n",
+                test_indirect[0], test_indirect[1], test_indirect[2], test_indirect[3]);
+        kfree(test_indirect);
+    }
     out = (uint8_t*)ptr;
     bytes_read = 0;
     while (bytes_read < size)
@@ -624,19 +645,55 @@ size_t ext2_fread(ext2_FILE *stream, void *ptr, size_t size)
         block_offset = file_offset % EXT2_BLOCK_SIZE;
 
         block_num = 0;
-        if (block_index < 12)
-        {
+        // if (block_index < 12)
+        // {
+        //     block_num = stream->inode.i_block[block_index];
+        // }
+        // else
+        // {
+        //     indirect_index = block_index - 12;
+        //     if (indirect_index < EXT2_BLOCK_SIZE / 4)
+        //     {
+        //         uint32_t indirect_buf[EXT2_BLOCK_SIZE / 4];
+        //         ext2_read_block(stream->inode.i_block[12], (uint8_t*)indirect_buf);
+        //         block_num = indirect_buf[indirect_index];
+        //     }
+        // }
+        if (block_index < 12) {
             block_num = stream->inode.i_block[block_index];
         }
-        else
-        {
+        else if (block_index < 12 + 256) {
+            // Indirección simple
             indirect_index = block_index - 12;
-            if (indirect_index < EXT2_BLOCK_SIZE / 4)
-            {
-                uint32_t indirect_buf[EXT2_BLOCK_SIZE / 4];
-                ext2_read_block(stream->inode.i_block[12], (uint8_t*)indirect_buf);
-                block_num = indirect_buf[indirect_index];
-            }
+            // uint32_t indirect_buf[EXT2_BLOCK_SIZE / 4];
+            uint32_t *indirect_buf = kmalloc(EXT2_BLOCK_SIZE);
+
+            ext2_read_block(stream->inode.i_block[12], (uint8_t*)indirect_buf);
+            block_num = indirect_buf[indirect_index];
+            
+            // kprintf("[EXT2] raw bytes: %02x %02x %02x %02x\n",
+            //             ((uint8_t*)indirect_buf)[0], ((uint8_t*)indirect_buf)[1],
+            //             ((uint8_t*)indirect_buf)[2], ((uint8_t*)indirect_buf)[3]);
+            // kprintf("[EXT2] as uint32: %d\n", indirect_buf[0]);
+            kfree(indirect_buf);
+        }
+        else {
+            // Indirección doble
+            uint32_t double_index = block_index - 12 - 256;
+            uint32_t l1_index = double_index / 256;
+            uint32_t l2_index = double_index % 256;
+
+            // uint32_t l1_buf[EXT2_BLOCK_SIZE / 4];
+            uint32_t *l1_buf = kmalloc(EXT2_BLOCK_SIZE);
+
+            ext2_read_block(stream->inode.i_block[13], (uint8_t*)l1_buf);
+
+            uint32_t *l2_buf = kmalloc(EXT2_BLOCK_SIZE);
+            ext2_read_block(l1_buf[l1_index], (uint8_t*)l2_buf);
+
+            block_num = l2_buf[l2_index];
+            kfree(l1_buf);
+            kfree(l2_buf);
         }
 
         if (block_num == 0) break;
@@ -651,6 +708,7 @@ size_t ext2_fread(ext2_FILE *stream, void *ptr, size_t size)
         bytes_read += to_copy;
     }
 
+    kfree(blockbuf);
     stream->pos += bytes_read;
     return bytes_read;
 }
@@ -760,7 +818,6 @@ int sys_open(const char *path, int flags)
 {
     task_t *current = get_current_task();
     int fd;
-    int n;
     char mode_str[4];
     ext2_FILE *fp;
 
@@ -801,7 +858,7 @@ int sys_open(const char *path, int flags)
     {
         /*fill module fileops*/
         int mod_num;
-        n = ext2_fread(fp, &mod_num, 4);
+        ext2_fread(fp, &mod_num, 4);
 
         module_t *mod = get_module_by_id(mod_num);
         if (!mod)
@@ -809,7 +866,7 @@ int sys_open(const char *path, int flags)
             kprintf("sys_open: module not found: %d\n", mod_num);
             return -1;
         }
-        current->fd_pointers[fd].fops.read = mod->read;
+        current->fd_pointers[fd].fops.read = (void*)mod->read;
         current->fd_pointers[fd].fops.write = NULL;
         current->fd_pointers[fd].fops.close = NULL;
         current->fd_pointers[fd].fp = mod;
@@ -820,9 +877,9 @@ int sys_open(const char *path, int flags)
     else
     {
         /* TODO REVIEWWWW!!! */
-        current->fd_pointers[fd].fops.read = ext2_fread;
-        current->fd_pointers[fd].fops.write = ext2_fwrite;
-        current->fd_pointers[fd].fops.close = ext2_fclose;
+        current->fd_pointers[fd].fops.read = (void*)ext2_fread;
+        current->fd_pointers[fd].fops.write = (void*)ext2_fwrite;
+        current->fd_pointers[fd].fops.close = (void*)ext2_fclose;
         /* TODO REVIEWWWW!!! */
         current->fd_pointers[fd].type = FD_FILE;
         current->fd_pointers[fd].fp = fp;
@@ -906,7 +963,7 @@ ssize_t sys_read(int fd, void *buf, size_t count)
         if (mod && mod->read)
         {
             size_t offset = file_obj->offset;
-            mod->read(buf, count, &file_obj->offset);
+            mod->read(buf, count, (size_t*)&file_obj->offset);
             if (file_obj->offset > 0)
                 return file_obj->offset - offset;
             else
@@ -961,17 +1018,17 @@ ssize_t sys_lseek(int fd, ssize_t offset, int whence)
         return -1;
 
     ext2_FILE *fp = file_obj->fp;
-    size_t new_pos;
+    ssize_t new_pos;
     if (whence == SEEK_SET)
         new_pos = offset;
     else if (whence == SEEK_CUR)
-        new_pos = fp->pos + offset;
+        new_pos = (ssize_t)fp->pos + offset;
     else if (whence == SEEK_END)
-        new_pos = fp->inode.i_size + offset;
+        new_pos = (ssize_t)fp->inode.i_size + offset;
     else
         return -1;
 
-    if (new_pos < 0 || new_pos > fp->inode.i_size)
+    if (new_pos < 0 || (size_t)new_pos > fp->inode.i_size)
         return -1;
 
     fp->pos = new_pos;
@@ -1687,4 +1744,85 @@ void ext2_mount(void)
     install_all_cmds(ext2_commands_debug, DEBUG);
     create_unix_dirs();
     test_fileio();
+}
+
+#define ENOENT 2
+
+struct statx_timestamp {
+    int64_t  tv_sec;
+    uint32_t tv_nsec;
+    int32_t  __reserved;
+};
+
+struct statx {
+    uint32_t stx_mask;
+    uint32_t stx_blksize;
+    uint64_t stx_attributes;
+    uint32_t stx_nlink;
+    uint32_t stx_uid;
+    uint32_t stx_gid;
+    uint16_t stx_mode;
+    uint16_t __spare0[1];
+    uint64_t stx_ino;
+    uint64_t stx_size;
+    uint64_t stx_blocks;
+    uint64_t stx_attributes_mask;
+    struct statx_timestamp stx_atime;
+    struct statx_timestamp stx_btime;
+    struct statx_timestamp stx_ctime;
+    struct statx_timestamp stx_mtime;
+    uint32_t stx_rdev_major;
+    uint32_t stx_rdev_minor;
+    uint32_t stx_dev_major;
+    uint32_t stx_dev_minor;
+};
+
+int sys_statx(int dirfd, const char *path, int flags,
+              unsigned int mask, void *statxbuf)
+{
+    (void)dirfd; (void)flags;
+    if (!path || !statxbuf)
+        return -1;
+
+    const char *resolved = path;
+    if (path[0] == '\0') {
+        return -1;
+    }
+
+    uint32_t inode_num;
+    if (ext2_resolve_path(resolved, &inode_num) < 0)
+        return -2; // -ENOENT
+
+    struct ext2_inode inode;
+    ext2_read_inode(inode_num, &inode);
+
+    struct statx *sx = (struct statx*)statxbuf;
+    memset(sx, 0, sizeof(*sx));
+
+    sx->stx_mask     = mask;
+    sx->stx_blksize  = 1024;
+    sx->stx_nlink    = inode.i_links_count;
+    sx->stx_uid      = inode.i_uid;
+    sx->stx_gid      = inode.i_gid;
+    sx->stx_mode     = inode.i_mode;
+    sx->stx_ino      = inode_num;
+    sx->stx_size     = inode.i_size;
+    sx->stx_blocks   = inode.i_blocks;
+    sx->stx_atime.tv_sec = inode.i_atime;
+    sx->stx_mtime.tv_sec = inode.i_mtime;
+    sx->stx_ctime.tv_sec = inode.i_ctime;
+    sx->stx_dev_major = 8;  // sda
+    sx->stx_dev_minor = 0;
+
+    return 0;
+}
+
+int sys_fadvise64(int fd, off_t offset, off_t len, int advice)
+{
+    /* no cache, so no-op */
+    (void)fd;
+    (void)offset;
+    (void)len;
+    (void)advice;
+    return 0;
 }

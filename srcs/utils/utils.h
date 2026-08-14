@@ -42,8 +42,6 @@ uint32_t strtol(const char* str, char** endptr, int base);
 uint32_t hex_string_to_int(const char *hex_str);
 uint32_t get_stack_pointer();
 void dump_registers_c(registers_t* regs);
-void kernel_panic_(char* msg, const char* file, int line, const char* func_name);
-#define kernel_panic(msg) kernel_panic_(msg, __FILE__, __LINE__, __func__)
 extern void dump_registers();
 void *memcpy(void *dest, const void *src, size_t n);
 int memcmp(const void* s1, const void* s2, size_t n);
@@ -58,8 +56,5 @@ char *strcat(char *dest, const char *src);
 char *strchr(const char *s, int c);
 void *memmove(void *dest, const void *src, size_t n);
 void uitoa(unsigned int value, char *str, int base);
-
-#define ASSERT(x)   if (!(x)) { kernel_panic("Assertion failed: " #x); }
-#define NEVER_HERE  kernel_panic("NEVER_HERE")
 
 #endif

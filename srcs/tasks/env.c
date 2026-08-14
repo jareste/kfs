@@ -1,6 +1,8 @@
 #include "../utils/utils.h"
 #include "../utils/stdint.h"
 #include "../memory/memory.h"
+#include "../memory/vmalloc.h"
+#include "../display/display.h"
 #include "env.h"
 
 #define INITIAL_HASHTABLE_SIZE 128

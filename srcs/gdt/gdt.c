@@ -1,5 +1,6 @@
 #include "gdt.h"
 #include "../display/display.h"
+#include "../tasks/task.h"
 
 gdt_entry_t gdt[GDT_ENTRIES];
 gdt_ptr_t* gdt_ptr = (gdt_ptr_t*)GDT_ADDRESS;
@@ -79,8 +80,7 @@ void gdt_set_entry(int index, uint32_t base, uint32_t limit, uint8_t access, uin
 
 void print_gdt8()
 {
-    #include "../tasks/task.h"
-    uint32_t tls_base = gdt[8].base_low | 
+    uint32_t tls_base = gdt[8].base_low |
                         ((uint32_t)gdt[8].base_middle << 16) | 
                         ((uint32_t)gdt[8].base_high << 24);
     kprintf("GDT[8] base=%x access=%x\n", tls_base, gdt[8].access);

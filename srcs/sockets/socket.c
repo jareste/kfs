@@ -2,6 +2,7 @@
 #include "../tasks/task.h"
 #include "../utils/utils.h"
 #include "../ide/ext2_fileio.h"
+#include "../display/display.h"
 
 socket_t *socket_create(int domain, int type, int protocol)
 {

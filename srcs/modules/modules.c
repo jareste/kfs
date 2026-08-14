@@ -14,6 +14,7 @@ static module_node_t* module_list = NULL;
 static int module_count = 0;
 static int next_module_id = 1;
 
+static module_node_t *find_node(module_t *module) __attribute__((unused));
 static module_node_t *find_node(module_t *module)
 {
     module_node_t *n;
@@ -156,7 +157,7 @@ void dispatch_cpu_cycle(void)
     }
 }
 
-void dispatch_time_request(struct time_info *timeData)
+void dispatch_time_request(timespec_t *timeData)
 {
     module_node_t *n;
     module_t *m;
@@ -196,14 +197,16 @@ void *module_alloc(size_t size)
     return ptr;
 }
 
-void module_free(void *ptr) 
+void module_free(void *ptr)
 {
+    (void)ptr;
     /* In a simple ring allocator, free is not implemented.
        A real implementation would require a more sophisticated scheme. */
 }
 
 /* cli commands */
 #include "../kshell/kshell.h"
+#include "../keyboard/keyboard.h"
 
 void rmmod();
 void install_module();
@@ -235,9 +238,7 @@ void list_modules_cmd()
 void insmod(const char *path);
 void install_module()
 {
-    int i;
     char* buffer;
-    uint32_t section;
 
     puts("Enter the path: ");
     buffer = get_line();
@@ -246,9 +247,7 @@ void install_module()
 
 void rmmod()
 {
-    int i;
     char* buffer;
-    uint32_t section;
 
     puts("Enter the module name: ");
     buffer = get_line();

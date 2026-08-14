@@ -27,6 +27,8 @@ char** _get_full_env(void);
 
 void set_active_env(env_hashtable_t *env);
 
+void env_hashtable_destroy(env_hashtable_t *table);
+
 void print_env(void);
 
 #endif

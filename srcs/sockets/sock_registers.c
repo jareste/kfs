@@ -1,5 +1,6 @@
 #include "sock_registers.h"
 #include "../memory/memory.h"
+#include "../memory/kmalloc.h"
 #include "../utils/utils.h"
 
 static socket_registry_node_t *socket_registry = NULL;

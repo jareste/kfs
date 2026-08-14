@@ -3,6 +3,7 @@
 
 #include "../utils/stdint.h"
 #include "../utils/utils.h"
+#include "../time/time.h"
 
 typedef int  (*module_init_fn_t)(void);
 typedef void (*module_exit_fn_t)(void);
@@ -59,7 +60,7 @@ typedef enum
     MODULE_FLAG_TIME       = 0x0004,
 } module_flags_t;
 
-struct time_info;
+struct kernel_services;
 
 /* Module interface structure */
 typedef struct
@@ -76,7 +77,7 @@ typedef struct
     /* Event callbacks */
     void (*on_key_event)(int key, int state);
     void (*on_cpu_cycle)();
-    void (*on_time_request)(struct time_info *timeData);
+    void (*on_time_request)(timespec_t *timeData);
 } module_t;
 
 /* API to register and unregister modules */
@@ -86,7 +87,7 @@ int unregister_module(module_t *module);
 /* Dispatch functions used by the kernel to notify events */
 void dispatch_key_event(int key, int state);
 void dispatch_cpu_cycle(void);
-void dispatch_time_request(struct time_info *timeData);
+void dispatch_time_request(timespec_t *timeData);
 
 module_t *get_module_by_id(int module_id);
 

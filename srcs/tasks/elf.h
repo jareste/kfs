@@ -37,6 +37,6 @@ typedef struct {
     uint32_t p_align;
 } elf32_phdr_t;
 
-int exec_bin(const char* path);
+int exec_bin(const char* path, char* const argv[], char* const envp[]);
 
 #endif

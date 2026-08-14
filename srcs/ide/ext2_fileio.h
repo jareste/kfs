@@ -78,5 +78,6 @@ ssize_t sys_write(int fd, const void *buf, size_t count);
 
 
 int create_device_node(const char *dir, const char *name, module_t *module);
+int delete_device_node(const char *dir, const char *name);
 
 #endif

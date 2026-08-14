@@ -4,7 +4,6 @@ int put_hex(uint32_t n)
 {
     char hex[16] = "0123456789ABCDEF";
     char buffer[9];
-    int i = 0;
 
     for (int j = 0; j < 8; j++)
     {
@@ -21,7 +20,6 @@ int put_2_hex(uint8_t n)
 {
     char hex[16] = "0123456789ABCDEF";
     char buffer[3];
-    int i = 0;
 
     for (int j = 0; j < 2; j++)
     {

@@ -144,6 +144,7 @@ format: crdisk
 	gcc -m32 -nostdlib -static -I/workspaces/kfs/sysroot/include /workspaces/kfs/sysroot/lib/crt1.o /workspaces/kfs/sysroot/lib/crti.o test/hello.c /workspaces/kfs/sysroot/lib/libc.a /workspaces/kfs/sysroot/lib/crtn.o -o hello
 	gcc -m32 -nostdlib -static -I/workspaces/kfs/sysroot/include /workspaces/kfs/sysroot/lib/crt1.o /workspaces/kfs/sysroot/lib/crti.o test/hello2.c /workspaces/kfs/sysroot/lib/libc.a /workspaces/kfs/sysroot/lib/crtn.o -o hello2
 	sudo cp hello mnt_ext2/.
+	sudo cp busybox mnt_ext2/.
 	sudo cp hello2 mnt_ext2/.
 	sudo make -C uspace/programs/ushell
 	sudo cp uspace/programs/ushell/ushell mnt_ext2/.

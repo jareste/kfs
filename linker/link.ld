@@ -1,20 +1,26 @@
 ENTRY(start)
 
+PHDRS {
+    text PT_LOAD FLAGS(5);  /* R+X  - multiboot header + code */
+    rodata PT_LOAD FLAGS(4);  /* R    - read-only data */
+    data PT_LOAD FLAGS(6);  /* R+W  - writable data/bss */
+}
+
 SECTIONS {
     . = 0x100000;
 
     .multiboot : {
         *(.multiboot)
-    }
+    } :text
 
     .text : {
         *(.text)
-    }
+    } :text
 
     .rodata : {
         *(.rodata)
         *(.rodata.*)
-    }
+    } :rodata
 
     .data : {
         *(.data)
@@ -23,12 +29,12 @@ SECTIONS {
         __ksymtab_start = .;
         KEEP(*(__ksymtab))
         __ksymtab_end = .;
-    }
+    } :data
 
     .bss : {
         *(COMMON)
         *(.bss)
-    }
+    } :data
 
     /*
      * _kernel_end marks the first byte past the kernel image.

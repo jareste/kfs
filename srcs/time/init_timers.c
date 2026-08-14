@@ -2,6 +2,7 @@
 #include "../io/io.h"
 #include "../keyboard/idt.h"
 #include "../tasks/task.h"
+#include "../display/display.h"
 #include "time.h"
 
 /* PIT and PIC definitions */

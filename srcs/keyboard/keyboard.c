@@ -5,6 +5,7 @@
 #include "idt.h"
 #include "../memory/memory.h"
 #include "../tasks/task.h"
+#include "../display/tty/tty.h"
 #include "keyboard.h"
 
 #define KEYBOARD_DATA_PORT 0x60
@@ -83,8 +84,9 @@ void clear_kb_buffer()
 
 int write_stdin_wrapper(int fd, const char *buf, size_t count)
 {
-    int i;
+    size_t i;
 
+    (void)fd;
     for (i = 0; i < count; i++)
     {
         set_kb_char(buf[i]);
@@ -94,8 +96,9 @@ int write_stdin_wrapper(int fd, const char *buf, size_t count)
 
 int read_stdin_wrapper(int fd, char *buf, size_t count)
 {
-    int i;
+    size_t i;
 
+    (void)fd;
     for (i = 0; i < count; i++)
     {
         buf[i] = get_last_char_blocking();
@@ -103,22 +106,35 @@ int read_stdin_wrapper(int fd, char *buf, size_t count)
     return count;
 }
 
+// void broadcast_to_tty(char key)
+// {
+//     task_t* task = get_current_task();
+
+//     while (task)
+//     {
+//         if (task->is_user == true)
+//         {
+//             if (task->fd_table[0] == true && task->fd_pointers[0].type == FD_TTY)
+//             {
+//                 task->fd_pointers[0].fops.write(task->fd_pointers[0].fp, &key, 1);
+//             }
+//         }
+//         task = task->next;
+//         if (task == get_current_task())
+//             break;
+//     }
+// }
+
 void broadcast_to_tty(char key)
 {
-    task_t* task = get_current_task();
-
-    while (task)
-    {
-        if (task->is_user == true)
-        {
-            if (task->fd_table[0] == true && task->fd_pointers[0].type == FD_TTY)
-            {
-                task->fd_pointers[0].fops.write(task->fd_pointers[0].fp, &key, 1);
-            }
+    task_t *task = get_current_task();
+    while (task) {
+        if (task->is_user && task->fd_table[0] &&
+            task->fd_pointers[0].type == FD_TTY) {
+            tty_keyboard_input(task->fd_pointers[0].fp, &key, 1);
         }
         task = task->next;
-        if (task == get_current_task())
-            break;
+        if (task == get_current_task()) break;
     }
 }
 

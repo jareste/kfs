@@ -1,9 +1,29 @@
-// #include "../uspace/stdlib/kfs_stdlib.h"
 #include <unistd.h>
 #include <stdlib.h>
+#include <string.h>
 
-void main()
+void main(int argc, char *argv[])
 {
+
+    write(1, "Argc count: ", 11);
+    char chargc = '0' + argc;
+    char argc_str[2] = {chargc, '\0'};
+    write(1, argc_str, strlen(argc_str));
+    write(1, "\n", 1);
+    if (argc > 0)
+    {
+        int i = 0;
+        write(1, "ArgvName: ", 9);
+        write(1, argv[0], strlen(argv[0]));
+    }
+    write(1, "\n", 1);
+    if (argc > 1)
+    {
+        write(1, "\nArgv1: ", 8);
+        write(1, argv[1], strlen(argv[1]));
+    }
+    write(1, "\n", 1);
+
     const char msg[] = "Hello2222 World\n";
     write(1, msg, sizeof(msg) - 1);
     // exit(0);

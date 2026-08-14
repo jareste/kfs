@@ -75,6 +75,10 @@ typedef struct __attribute__((packed)) {
 } gdt_ptr_t;
 
 void gdt_init();
+void tss_init();
 void tss_set_stack(uint32_t stack);
+void register_gdt(void);
+void gdt_set_entry(int index, uint32_t base, uint32_t limit, uint8_t access, uint8_t granularity);
+void print_gdt8();
 
 #endif

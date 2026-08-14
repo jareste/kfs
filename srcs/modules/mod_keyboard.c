@@ -1,9 +1,12 @@
 #include "modules.h"
+#include "mod_keyboard.h"
 #include "../display/display.h"
 
 /* Module initialization */
 static int keyboard_init(module_t *self, struct kernel_services *services)
 {
+    (void)self;
+    (void)services;
     kprintf("[Keyboard Module] Initialized.\n");
     return 0;
 }
@@ -11,12 +14,13 @@ static int keyboard_init(module_t *self, struct kernel_services *services)
 /* Module cleanup */
 static void keyboard_cleanup(module_t *self)
 {
+    (void)self;
     kprintf("[Keyboard Module] Cleanup.\n");
 }
 
 const char* keyboard_buffer = "Hello, World!\n que tal?\n jajaja\n";
 
-static keyboard_read(module_t *self, char *buffer, size_t size, size_t* offset)
+static void keyboard_read(char *buffer, size_t size, size_t* offset)
 {
     size_t len = strlen(keyboard_buffer);
     if (*offset >= len)
@@ -31,8 +35,10 @@ static keyboard_read(module_t *self, char *buffer, size_t size, size_t* offset)
 }
 
 /* Callback for key events */
-static void keyboard_on_key_event(module_t *self, int key, int state)
+static void keyboard_on_key_event(int key, int state)
 {
+    (void)key;
+    (void)state;
     // kprintf("[Keyboard Module] Key %d %s.\n", key, (state) ? "pressed" : "released");
 }
 

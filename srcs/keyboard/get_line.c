@@ -1,6 +1,7 @@
 #include "keyboard.h"
 #include "../utils/utils.h"
 #include "../tasks/task.h"
+#include "../display/display.h"
 
 char* get_line()
 {

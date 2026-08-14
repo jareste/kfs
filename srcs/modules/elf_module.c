@@ -5,6 +5,7 @@
 #include "../ide/ext2_fileio.h"
 #include "../display/display.h"
 #include "../memory/memory.h"
+#include "../tasks/task.h"
 
 EXPORT_SYMBOL(kmalloc);
 EXPORT_SYMBOL(kfree);
@@ -175,7 +176,7 @@ module_t *elf_load_module(uint8_t *binary)
     }
 
     (void)exit_fn; /* TODO use it on rmmod */
-    return 0x1; /* TODO change function return to int instead of module_t* */
+    return (module_t *)0x1; /* TODO change function return to int instead of module_t* */
 }
 
 void insmod(const char *path)

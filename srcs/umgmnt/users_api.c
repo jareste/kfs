@@ -41,7 +41,7 @@ static int login(char *username, char *password)
     memcpy(&g_current_user, &u, sizeof(user_t));
     kprintf("Login successful as '%s'.\n", username);
     get_current_task()->state = TASK_WAITING;
-    #warning "Think how to implement login/logout, if i want it to be on kernel side"
+    /* TODO: think how to implement login/logout, if i want it to be on kernel side */
 
     set_current_dir(g_current_user.home_inode);
     clear_kb_buffer();

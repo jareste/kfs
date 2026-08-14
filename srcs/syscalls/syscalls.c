@@ -8,6 +8,7 @@
 #include "../time/time.h"
 #include "../panic/kpanic.h"
 #include "../gdt/gdt.h"
+#include "../memory/kmalloc.h"
 
 typedef int (*syscall_handler_6_t)(uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4, uint32_t arg5, uint32_t arg6);
 typedef int (*syscall_handler_5_t)(uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4, uint32_t arg5);
@@ -80,6 +81,7 @@ int sys_set_thread_area(struct user_desc *u_info)
 
 int sys_set_tid_address(int *tidptr)
 {
+    (void)tidptr;
     return get_current_task()->pid;
 }
 
@@ -168,10 +170,8 @@ time_t sys_time(time_t* tloc)
 int sys_execve(const char* path, char* const argv[], char* const envp[])
 {
     int ret;
-    (void)argv;
-    (void)envp;
     char* _path = kstrdup(path);
-    ret = exec_bin(_path);
+    ret = exec_bin(_path, argv, envp);
     if (ret < 0)
     {
         kprintf("Failed to execute binary: %s\n", _path);
@@ -196,6 +196,257 @@ int sys_rt_sygprocmask(int how, const uint32_t *set, uint32_t *oldset)
     return 0;
 }
 
+int sys_set_robust_list(void *head, size_t len)
+{
+    (void)head; (void)len;
+    return 0;
+}
+
+int sys_ugetrlimit(int resource, void *rlim)
+{
+    uint32_t *r = (uint32_t*)rlim;
+    (void)resource;
+    r[0] = 8 * 1024 * 1024; // rlim_cur = 8MB
+    r[1] = 0xFFFFFFFF;       // rlim_max = unlimited
+    return 0;
+}
+
+int sys_getppid()
+{
+    task_t *t = get_current_task();
+    return t->parent ? t->parent->pid : 1;
+}
+
+int sys_geteuid32()
+{
+    return get_current_task()->euid;
+}
+
+int sys_getgid32()
+{
+    return get_current_task()->gid;
+}
+
+int sys_setgid32(gid_t gid)
+{
+    task_t *t = get_current_task();
+    t->gid = gid;
+    return 0;
+}
+
+int sys_setuid32(uid_t uid)
+{
+    task_t *t = get_current_task();
+    t->uid = uid;
+    return 0;
+}
+
+int sys_getuid32()
+{
+    return get_current_task()->uid;
+}
+
+int sys_getrandom(void *buf, size_t buflen, unsigned int flags)
+{
+    (void)flags;
+    memset(buf, 0x42, buflen);
+    return buflen;
+}
+
+int sys_rt_sigaction(int sig, void *act, void *oldact, size_t sigsetsize)
+{
+    (void)sig; (void)act; (void)oldact; (void)sigsetsize;
+    return 0;
+}
+
+int sys_readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz)
+{
+    (void)dirfd;
+    if (strcmp(path, "/proc/self/exe") == 0)
+    {
+        strncpy(buf, get_current_task()->name, bufsiz);
+        return strlen(buf);
+    }
+    return -1;
+}
+
+struct utsname {
+    char sysname[65];    /* Operating system name (e.g., "Linux") */
+    char nodename[65];   /* Name within network */
+    char release[65];    /* Operating system release (e.g., "2.6.28") */
+    char version[65];    /* Operating system version */
+    char machine[65];    /* Hardware identifier */
+#ifdef _GNU_SOURCE
+    char domainname[65]; /* NIS or YP domain name */
+#endif
+};
+
+int sys_uname(struct utsname *buf)
+{
+    strncpy(buf->sysname, "kfs", sizeof(buf->sysname));
+    strncpy(buf->nodename, "kfs-node", sizeof(buf->nodename));
+    strncpy(buf->release, "0.9", sizeof(buf->release));
+    strncpy(buf->version, "0.1", sizeof(buf->version));
+    strncpy(buf->machine, "i386", sizeof(buf->machine));
+    return 0;
+}
+
+char *sys_getcwd(char *buf, size_t size)
+{
+    const char *cwd = "/workspaces/kfs"; // Solo soportamos la raíz
+    size_t len = strlen(cwd);
+    if (len + 1 > size)
+        return NULL; // Buffer demasiado pequeño
+    strncpy(buf, cwd, size);
+    return buf;
+}
+
+// ioctl requests más comunes de busybox
+#define TCGETS      0x5401
+#define TIOCGWINSZ  0x5413
+#define TIOCSWINSZ  0x5414
+#define TCSETSW     0x5403
+#define TCSETSF     0x5404
+#define TCSETS      0x5402
+
+struct winsize {
+    uint16_t ws_row;
+    uint16_t ws_col;
+    uint16_t ws_xpixel;
+    uint16_t ws_ypixel;
+};
+
+// termios simplificado
+struct termios {
+    uint32_t c_iflag;
+    uint32_t c_oflag;
+    uint32_t c_cflag;
+    uint32_t c_lflag;
+    uint8_t  c_line;
+    uint8_t  c_cc[19];
+};
+
+int sys_ioctl(int fd, uint32_t request, void *arg)
+{
+    task_t *task = get_current_task();
+    
+    return -1;
+    if (fd < 0 || fd >= MAX_FDS || !task->fd_table[fd])
+        return -1;
+
+    switch (request) {
+        case TIOCGWINSZ: {
+            if (!arg) return -1;
+            struct winsize *ws = (struct winsize*)arg;
+            ws->ws_row    = 25;
+            ws->ws_col    = 80;
+            ws->ws_xpixel = 0;
+            ws->ws_ypixel = 0;
+            return 0;
+        }
+        case TIOCSWINSZ:
+            return 0;
+
+        case TCGETS: {
+            if (!arg) return -1;
+            // Retorna una termios mínima que indica modo canónico + echo
+            struct termios *t = (struct termios*)arg;
+            memset(t, 0, sizeof(*t));
+            t->c_iflag = 0x6d02;  // BRKINT|ICRNL|IXON|IXANY
+            t->c_oflag = 0x0005;  // OPOST|ONLCR
+            t->c_cflag = 0x04bf;  // CS8|CREAD|HUPCL|B38400
+            t->c_lflag = 0x8a3b;  // ISIG|ICANON|ECHO|ECHOE|ECHOK|IEXTEN
+            t->c_cc[4] = 1;       // VMIN
+            t->c_cc[5] = 0;       // VTIME
+            return 0;
+        }
+        case TCSETS:
+        case TCSETSW:
+        case TCSETSF:
+            return 0; // acepta cambios pero los ignora
+
+        default:
+            return -1;
+    }
+}
+
+struct timespec64 {
+    int64_t  tv_sec;
+    int32_t  tv_nsec;
+};
+
+int sys_clock_gettime64(int clockid, struct timespec64 *tp)
+{
+    (void)clockid;
+    if (!tp)
+        return -1;
+    
+    // Retorna tiempo simple basado en ticks del kernel
+    tp->tv_sec  = get_kuptime(); // segundos desde arranque
+    tp->tv_nsec = 0;
+    return 0;
+}
+
+struct timespec32 {
+    int32_t tv_sec;
+    int32_t tv_nsec;
+};
+
+int sys_clock_gettime(int clockid, struct timespec32 *tp)
+{
+    (void)clockid;
+    if (!tp) return -1;
+    tp->tv_sec  = get_kuptime();
+    tp->tv_nsec = 0;
+    return 0;
+}
+
+int sys_wait4(pid_t pid, int *status, int options, void *rusage);
+struct iovec
+{
+    void  *iov_base;
+    size_t iov_len;
+};
+
+int sys_writev(int fd, const struct iovec *iov, int iovcnt)
+{
+    if (!iov || iovcnt <= 0)
+        return -1;
+
+    int total = 0;
+    for (int i = 0; i < iovcnt; i++)
+    {
+        if (!iov[i].iov_base || iov[i].iov_len == 0)
+            continue;
+        int n = _sys_write(fd, iov[i].iov_base, iov[i].iov_len);
+        if (n < 0)
+            return total > 0 ? total : -1;
+        total += n;
+    }
+    return total;
+}
+
+int sys_dup2(int oldfd, int newfd)
+{ 
+    task_t *t = get_current_task();
+    if (oldfd < 0 || oldfd >= MAX_FDS || !t->fd_table[oldfd])
+        return -1;
+    if (newfd < 0 || newfd >= MAX_FDS)
+        return -1;
+    if (newfd == oldfd)
+        return newfd;
+    if (t->fd_table[newfd])
+        sys_close(newfd, t);
+    memcpy(&t->fd_pointers[newfd], &t->fd_pointers[oldfd], sizeof(file_t));
+    t->fd_table[newfd] = true;
+    return newfd;
+}
+
+int sys_brk(uint32_t new_brk);
+int sys_mprotect(uint32_t addr, size_t len, int prot);
+int sys_statx(int dirfd, const char *path, int flags,
+              unsigned int mask, void *statxbuf);
+int sys_fadvise64(int fd, off_t offset, off_t len, int advice);
 int syscall_handler(iret_regs_t* reg)
 {
     uint32_t syscall_number = reg->eax;
@@ -215,7 +466,7 @@ int syscall_handler(iret_regs_t* reg)
     {
         kprintf("Unknown syscall: %d\n", syscall_number);
         kpanic("Invalid syscall number", 1);
-        return -1;
+        return -38; // -ENOSYS
     }
 
     syscall_entry_t entry = syscall_table[syscall_number];
@@ -254,115 +505,61 @@ int syscall_handler(iret_regs_t* reg)
     return ret_value.int_value;
 }
 
+void* sys_mmap2(uint32_t addr, size_t length, int prot,
+                int flags, int fd, uint32_t pgoffset);
+int sys_munmap(void *addr, size_t length);
+int sys_rseq(void *rseq_ptr, uint32_t rseq_len, int flags, uint32_t sig);
 void init_syscalls()
 {
     memset(syscall_table, 0, sizeof(syscall_table));
 
-    syscall_table[SYS_EXIT] = (syscall_entry_t){
-        .ret_value_entry = RET_INT,
-        .num_args = 1,
-        .handler.handler = (void*)sys_exit,
-    };
+    syscall_table[SYS_EXIT] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_exit };
+    syscall_table[SYS_WRITE] = (syscall_entry_t){ .ret_value_entry = RET_SIZE, .num_args = 3, .handler.handler = (void*)_sys_write, };
+    syscall_table[SYS_READ] = (syscall_entry_t){ .ret_value_entry = RET_SIZE, .num_args = 3, .handler.handler = (void*)_sys_read };
+    syscall_table[SYS_OPEN] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)_sys_open };
+    syscall_table[SYS_CLOSE] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)_sys_close, };
+    syscall_table[SYS_GETPID] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 0, .handler.handler = (void*)sys_get_pid };
+    syscall_table[SYS_SIGNAL] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_signal };
+    syscall_table[SYS_KILL] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_kill };
+    syscall_table[SYS_EXECVE] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 3, .handler.handler = (void*)sys_execve };
+    syscall_table[SYS_NANOSLEEP] = (syscall_entry_t){ .ret_value_entry = RET_VOID, .num_args = 1, .handler.handler = (void*)sys_usleep };
+    syscall_table[SYS_SLEEP] = (syscall_entry_t){ .ret_value_entry = RET_VOID, .num_args = 1, .handler.handler = (void*)sys_sleep };
+    syscall_table[SYS_TIME] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_time };
+    syscall_table[SYS_SET_THREAD_AREA] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_set_thread_area };
+    syscall_table[SYS_SET_TID_ADDRESS] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_set_tid_address };
+    /* TODO maybe create sys_exit_group ?*/
+    syscall_table[SYS_EXIT_GROUP] = (syscall_entry_t){ .ret_value_entry = RET_VOID, .num_args = 1, .handler.handler = (void*)sys_exit };
+    syscall_table[SYS_BRK] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_brk };
+    syscall_table[SYS_MPROTECT] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 3, .handler.handler = (void*)sys_mprotect };
+    syscall_table[SYS_MMAP2] = (syscall_entry_t){ .ret_value_entry = RET_PTR, .num_args = 6, .handler.handler = (void*)sys_mmap2 };
+    syscall_table[SYS_MUNMAP] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_munmap, };
+    syscall_table[SYS_DUP2] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_dup2 };
+    syscall_table[SYS_SET_ROBUST_LIST] = (syscall_entry_t){ .num_args=2, .handler.handler=(void*)sys_set_robust_list };
+    syscall_table[SYS_RSEQ] = (syscall_entry_t){ .num_args=4, .handler.handler=(void*)sys_rseq };
+    syscall_table[SYS_UGETRLIMIT] = (syscall_entry_t){ .num_args=2, .handler.handler=(void*)sys_ugetrlimit };
+    syscall_table[SYS_GETPPID]  = (syscall_entry_t){ .num_args=0, .handler.handler=(void*)sys_getppid };
+    syscall_table[SYS_GETEUID32] = (syscall_entry_t){ .num_args=0, .handler.handler=(void*)sys_geteuid32 };
+    syscall_table[SYS_GETGID32] = (syscall_entry_t){ .num_args=0, .handler.handler=(void*)sys_getgid32 };
+    syscall_table[SYS_SETGID32] = (syscall_entry_t){ .num_args=1, .handler.handler=(void*)sys_setgid32 };
+    syscall_table[SYS_SETUID32] = (syscall_entry_t){ .num_args=1, .handler.handler=(void*)sys_setuid32 };
+    syscall_table[SYS_GETUID32] = (syscall_entry_t){ .num_args=0, .handler.handler=(void*)sys_getuid32 };
+    syscall_table[SYS_GETRANDOM] = (syscall_entry_t){ .num_args=3, .handler.handler=(void*)sys_getrandom };
+    syscall_table[SYS_RT_SIGACTION] = (syscall_entry_t){ .num_args=4, .handler.handler=(void*)sys_rt_sigaction };
+    syscall_table[SYS_READLINKAT] = (syscall_entry_t){ .num_args=4, .handler.handler=(void*)sys_readlinkat };
+    syscall_table[SYS_IOCTL]  = (syscall_entry_t){ .num_args=3, .handler.handler=(void*)sys_ioctl };
+    syscall_table[SYS_STATX] = (syscall_entry_t){ .num_args=5, .handler.handler=(void*)sys_statx };
+    syscall_table[SYS_UNAME] = (syscall_entry_t){ .num_args=1, .handler.handler=(void*)sys_uname };
+    syscall_table[SYS_GETCWD] = (syscall_entry_t){ .num_args=2, .handler.handler=(void*)sys_getcwd };
+    syscall_table[SYS_WAIT4] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 4, .handler.handler = (void*)sys_wait4 };
+    syscall_table[SYS_WRITEV] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 3, .handler.handler = (void*)sys_writev };
+    syscall_table[SYS_SIGPROCMASK] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 3, .handler.handler = (void*)sys_rt_sygprocmask };
+    syscall_table[403] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_clock_gettime64 };
 
-    syscall_table[SYS_WRITE] = (syscall_entry_t){
-        .ret_value_entry = RET_SIZE,
-        .num_args = 3,
-        .handler.handler = (void*)_sys_write,
-    };
-
-    syscall_table[SYS_READ] = (syscall_entry_t){
-        .ret_value_entry = RET_SIZE,
-        .num_args = 3,
-        .handler.handler = (void*)_sys_read,
-    };
-
-    syscall_table[SYS_OPEN] = (syscall_entry_t){
-        .ret_value_entry = RET_INT,
+    syscall_table[265] = (syscall_entry_t){
         .num_args = 2,
-        .handler.handler = (void*)_sys_open,
+        .handler.handler = (void*)sys_clock_gettime,
     };
 
-    syscall_table[SYS_CLOSE] = (syscall_entry_t){
-        .ret_value_entry = RET_INT,
-        .num_args = 1,
-        .handler.handler = (void*)_sys_close,
-    };
+    syscall_table[SYS_FADVISE64] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 4, .handler.handler = (void*)sys_fadvise64 };
 
-    syscall_table[SYS_GETPID] = (syscall_entry_t){
-        .ret_value_entry = RET_INT,
-        .num_args = 0,
-        .handler.handler = (void*)sys_get_pid,
-    };
-
-    // syscall_table[SYS_SLEEP] = (syscall_entry_t){
-    //     .ret_value_entry = RET_INT,
-    //     .num_args = 1,
-    //     .handler.handler_1 = sys_sleep,
-    // };
-
-    syscall_table[SYS_SIGNAL] = (syscall_entry_t){
-        .ret_value_entry = RET_INT,
-        .num_args = 2,
-        .handler.handler = (void*)sys_signal,
-    };
-
-    syscall_table[SYS_KILL] = (syscall_entry_t){
-        .ret_value_entry = RET_INT,
-        .num_args = 2,
-        .handler.handler = (void*)sys_kill,
-    };
-
-    syscall_table[SYS_EXECVE] = (syscall_entry_t){
-        .ret_value_entry = RET_INT,
-        .num_args = 3,
-        .handler.handler = (void*)sys_execve,
-    };
-
-    // syscall_table[SYS_GETTIMEOFDAY] = (syscall_entry_t){
-    //     .ret_value_entry = RET_INT,
-    //     .num_args = 0,
-    //     .handler.handler = (void*)get_kuptime,
-    // };
-
-    syscall_table[SYS_NANOSLEEP] = (syscall_entry_t){
-        .ret_value_entry = RET_VOID,
-        .num_args = 1,
-        .handler.handler = (void*)sys_usleep,
-    };
-
-    syscall_table[SYS_SLEEP] = (syscall_entry_t){
-        .ret_value_entry = RET_VOID,
-        .num_args = 1,
-        .handler.handler = (void*)sys_sleep,
-    };
-
-    syscall_table[SYS_TIME] = (syscall_entry_t){
-        .ret_value_entry = RET_INT,
-        .num_args = 1,
-        .handler.handler = (void*)sys_time,
-    };
-
-    syscall_table[SYS_SET_THREAD_AREA] = (syscall_entry_t){
-        .ret_value_entry = RET_INT,
-        .num_args = 1,
-        .handler.handler = (void*)sys_set_thread_area,
-    };
-
-    syscall_table[SYS_SET_TID_ADDRESS] = (syscall_entry_t){
-        .ret_value_entry = RET_INT,
-        .num_args = 1,
-        .handler.handler = (void*)sys_set_tid_address,
-    };
-
-    syscall_table[SYS_EXIT_GROUP] = (syscall_entry_t){
-        .ret_value_entry = RET_VOID,
-        .num_args = 1,
-        .handler.handler = (void*)sys_exit, /* TODO maybe create sys_exit_group ?*/
-    };
-
-    syscall_table[SYS_SIGPROCMASK] = (syscall_entry_t){
-        .ret_value_entry = RET_INT,
-        .num_args = 3,
-        .handler.handler = (void*)sys_rt_sygprocmask,
-    };
 }

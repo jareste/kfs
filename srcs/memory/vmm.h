@@ -7,8 +7,12 @@
 /*  Page size and address decomposition                               */
 /* ------------------------------------------------------------------ */
 
+#ifndef PAGE_SIZE
 #define PAGE_SIZE           4096u
+#endif
+#ifndef PAGE_ALIGN
 #define PAGE_ALIGN(a)       (((a) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1))
+#endif
 
 /*
  * A 32-bit linear (virtual) address is split as:
@@ -25,9 +29,15 @@
 /*  Page directory / page table entry flags                           */
 /* ------------------------------------------------------------------ */
 
+#ifndef PAGE_PRESENT
 #define PAGE_PRESENT    (1u << 0)   /* P   – page is in physical memory    */
+#endif
+#ifndef PAGE_RW
 #define PAGE_RW         (1u << 1)   /* R/W – 0 = read-only, 1 = read/write */
+#endif
+#ifndef PAGE_USER
 #define PAGE_USER       (1u << 2)   /* U/S – 0 = kernel only, 1 = user ok  */
+#endif
 #define PAGE_ACCESSED   (1u << 5)   /* A   – set by CPU on read            */
 #define PAGE_DIRTY      (1u << 6)   /* D   – set by CPU on write (PTE only)*/
 

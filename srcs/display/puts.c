@@ -2,8 +2,9 @@
 
 int write_stdout_wrapper(int fd, const char *buf, size_t count)
 {
-    int i;
+    size_t i;
 
+    (void)fd;
     for (i = 0; i < count; i++)
     {
         putc(buf[i]);
@@ -13,8 +14,9 @@ int write_stdout_wrapper(int fd, const char *buf, size_t count)
 
 int write_stderr_wrapper(int fd, const char *buf, size_t count)
 {
-    int i;
+    size_t i;
 
+    (void)fd;
     for (i = 0; i < count; i++)
     {
         putc(buf[i]);

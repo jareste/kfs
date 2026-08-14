@@ -7,6 +7,8 @@
 #include "../ide/fs.h"
 #include "kshell.h"
 #include "../tasks/task.h"
+#include "../syscalls/syscalls.h"
+#include "../modules/mod_keyboard.h"
 
 #include "../ide/ext2_fileio.h"
 
@@ -195,6 +197,7 @@ static void ks_kill()
 
 static void task_1_sighandler(int signal)
 {
+    (void)signal;
     puts_color("Task 1 received signal\n", RED);
 }
 
@@ -319,7 +322,7 @@ static void ks_kdump()
     size = (uint32_t)hex_string_to_int(buffer);
     kprintf("Size: %x\n", size);
 
-    if (size < 0 || size > 0x1000)
+    if (size > 0x1000)
     {
         kprintf("Invalid size. Size must be between 0 and 0x1000\n");
         return;
@@ -360,7 +363,7 @@ static void cmd_section()
     puts("Enter the section: ");
     buffer = get_line();
     section = (uint32_t)hex_string_to_int(buffer);
-    if (section < 0 || section >= MAX_SECTIONS)
+    if (section >= MAX_SECTIONS)
     {
         puts("Invalid section\n");
         return;
@@ -403,7 +406,7 @@ static void set_layout()
     puts("Enter the layout: ");
     buffer = get_line();
     layout = (uint32_t)hex_string_to_int(buffer);
-    if (layout < 0 || layout >= MAX_KEYBOARD)
+    if (layout >= MAX_KEYBOARD)
     {
         puts("Invalid layout\n");
         return;
@@ -494,7 +497,6 @@ void test_syscall()
 static void ks_read_mod_kb()
 {
     char buffer[256];
-    size_t offset = 0;
     size_t n;
     int fd;
     puts_color("Reading from keyboard module...\n", LIGHT_MAGENTA);

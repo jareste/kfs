@@ -60,6 +60,13 @@ typedef struct block_header
 void    kmalloc_init(uint32_t heap_start);
 
 /*
+ * kstrdup - duplicate a NUL-terminated string onto the kernel heap.
+ *
+ * Returns a kmalloc()'d copy of @s, or NULL on failure.
+ */
+void   *kstrdup(const char *s);
+
+/*
  * kmalloc - allocate @size bytes from the kernel heap.
  *
  * Returns a pointer to the usable region (just past the header).

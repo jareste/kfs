@@ -54,6 +54,7 @@ static vregion_t *find_region(uint32_t addr)
 /*
  * Insert @r into the region list, maintaining virt_start order.
  */
+static void insert_region(vregion_t *r) __attribute__((unused));
 static void insert_region(vregion_t *r)
 {
     vregion_t* cur;
@@ -262,7 +263,7 @@ uint32_t vbrk(int32_t pages)
         }
 
         /* Map pages one by one from the PMM */
-        for (i = 0; i < pages; i++)
+        for (i = 0; i < (uint32_t)pages; i++)
         {
             va = vbrk_cursor + (uint32_t)i * PAGE_SIZE;
             phys = pmm_alloc_frame();

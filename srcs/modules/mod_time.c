@@ -1,17 +1,15 @@
 #include "modules.h"
+#include "mod_time.h"
 #include "../display/display.h"
 #include "../time/time.h"
 #include "../utils/stdint.h"
-
-/* Define a structure to pass time information */
-struct time_info
-{
-    time_t current_time;
-};
+#include "../syscalls/syscalls.h"
 
 /* Module initialization */
 static int time_init(module_t *self, struct kernel_services *services)
 {
+    (void)self;
+    (void)services;
     kprintf("[Time Module] Initialized.\n");
     return 0;
 }
@@ -19,15 +17,14 @@ static int time_init(module_t *self, struct kernel_services *services)
 /* Module cleanup */
 static void time_cleanup(module_t *self)
 {
+    (void)self;
     kprintf("[Time Module] Cleanup.\n");
 }
 
 /* Callback for time requests */
-static void time_on_request(module_t *self, struct time_info *timeData)
+static void time_on_request(timespec_t *timeData)
 {
-    char* str = "[Time Module] Current time is %d.\n";
-    timeData->current_time = sys_time(NULL); /* no need to go through int, as we are in kernel. */
-    // kprintf(str, (long)timeData->current_time);
+    timeData->tv_sec = sys_time(NULL); /* no need to go through int, as we are in kernel. */
 }
 
 /* Define the module instance */

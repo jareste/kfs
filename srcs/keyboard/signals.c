@@ -100,6 +100,7 @@ static void signal_handler(int signal)
 
 static void panic_signal_handler(int signal)
 {
+    (void)signal;
     kpanic("Panic signal received", 1);
 }
 

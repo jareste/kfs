@@ -13,11 +13,14 @@
 #include "ide/ext2.h"
 #include "syscalls/syscalls.h"
 #include "modules/modules.h"
+#include "modules/mod_time.h"
+#include "modules/mod_keyboard.h"
 
 #include "umgmnt/users.h"
 
 extern uint32_t endkernel;
 void set_run_scheduler(int value);
+void ide_start();
 void kernel_main(uint32_t magic, multiboot_info_t *mbi)
 {
     // gdt_init();
@@ -93,6 +96,7 @@ void kernel_main(uint32_t magic, multiboot_info_t *mbi)
     enable_interrupts();
     outb(0x20, 0x20);
     start_foo_tasks();
+    ide_start();
     set_run_scheduler(1);
 
     /* Keep CPU busy */

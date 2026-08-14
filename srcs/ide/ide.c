@@ -45,7 +45,8 @@ typedef struct
 } ide_queue_t;
 
 static ide_queue_t   ide_queue    = {0};
-static pid_t         ide_task_pid = (pid_t)0;
+static pid_t         ide_task_pid = (pid_t)1;
+static bool          ide_initialized = false;
 
 static volatile ide_request_t *current_req = NULL;
 
@@ -86,7 +87,8 @@ static void ide_select_drive(uint32_t lba)
 
 void ide_read_sector_monotask(uint32_t lba, uint16_t* buffer)
 {
-    uint8_t status = inb(IDE_STATUS);
+    uint8_t status = inb(IDE_STATUS); /* read to clear pending status/IRQ */
+    (void)status;
     disable_interrupts();
     
     ide_wait_nonbusy();
@@ -200,7 +202,8 @@ static void ide_dispatch(ide_request_t *req)
 
 void ide_irq_handler(void)
 {
-    if (ide_task_pid == 0) /* Monotask */
+    bool ide_init = (get_task_by_pid(1) != NULL);
+    if ((ide_init == false) || (m_get_scheduler_running() == 0)) /* Monotask */
     {
         inb(IDE_STATUS);
         sema_signal(&ide_sem);
@@ -312,10 +315,12 @@ int ide_read_sectors(uint32_t lba, uint8_t count, void *buffer)
 {
     if (lba > MAX_LBA || count == 0) return -1;
     uint8_t *buf = (uint8_t *)buffer;
+
+    bool ide_init = (get_task_by_pid(1) != NULL);
     for (uint8_t i = 0; i < count; i++)
     {
-#warning think how to handle properly the monotask case, maybe move it to a separate function?
-        if (ide_task_pid == 0) /* monotask, maybe rethink it? */
+/* TODO: think how to handle properly the monotask case, maybe move it to a separate function? */
+        if ((ide_init == false) || m_get_scheduler_running() == 0) /* monotask, maybe rethink it? */
             ide_read_sector_monotask(lba + i, (uint16_t*)(buf + (i * IDE_SECTOR_SIZE)));
         else if (ide_enqueue_read(lba + i, buf + (i * IDE_SECTOR_SIZE)) < 0)
             return -1;
@@ -327,13 +332,22 @@ int ide_write_sectors(uint32_t lba, uint8_t count, void *buffer)
 {
     if (lba > MAX_LBA || count == 0) return -1;
     uint8_t *buf = (uint8_t *)buffer;
+    bool ide_init = (get_task_by_pid(1) != NULL);
     for (uint8_t i = 0; i < count; i++)
     {
-#warning think how to handle properly the monotask case, maybe move it to a separate function?
-        if (ide_task_pid == 0)
+/* TODO: think how to handle properly the monotask case, maybe move it to a separate function? */
+        if (ide_init == false || m_get_scheduler_running() == 0) /* monotask, maybe rethink it? */
             ide_write_sector_monotask(lba + i, (uint16_t*)(buf + (i * IDE_SECTOR_SIZE)));
         else if (ide_enqueue_write(lba + i, buf + (i * IDE_SECTOR_SIZE)) < 0)
             return -1;
     }
     return 0;
+}
+
+void ide_start()
+{
+    if (ide_initialized)
+        return;
+
+    ide_initialized = true;
 }

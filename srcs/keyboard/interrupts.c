@@ -10,6 +10,7 @@
 #include "../tasks/task.h"
 #include "../ide/ide.h"
 #include "../panic/kpanic.h"
+#include "../gdt/gdt.h"
 
 #define PF_PRESENT  (1 << 0)
 #define PF_WRITE    (1 << 1)
@@ -91,6 +92,21 @@ void page_fault_handler(registers* regs, error_state* stack)
     put_hex(stack->err_code);
     putc('\n');
 
+    // Lee el valor en esi-0x78
+    uint32_t esi = regs->esi;
+    uint32_t *ptr = (uint32_t*)(esi - 0x78);
+    kprintf("[FAULT] *(esi-0x78) = 0x%x at 0x%x\n", *ptr, (uint32_t)ptr);
+
+    // En el page fault handler, añade:
+    uint32_t rseq_va = 0x8048000;
+    uint32_t di = rseq_va >> 22;
+    uint32_t ti = (rseq_va >> 12) & 0x3FF;
+    page_directory_t *dir = get_current_task()->page_dir;
+    uint32_t pde = dir->entries[di];
+    page_table_t *tbl = (page_table_t*)(pde & 0xFFFFF000);
+    uint32_t pte = tbl->entries[ti];
+    kprintf("[FAULT] 0x8048000 PDE=%x PTE=%x\n", pde, pte);
+
     kprintf("Error type: ");
     if (!(stack->err_code & PF_PRESENT))
         kprintf("non-present page | ");
@@ -125,8 +141,11 @@ void page_fault_handler(registers* regs, error_state* stack)
         kprintf("TLS[0]=0x%x TLS[1]=0x%x TLS[2]=0x%x\n", tls[0], tls[1], tls[2]);
     }
     kprintf("Killing task %d due to page fault.\n", task->pid);
-    while (1) {}
     _exit(-1);  // or call kill_task() as appropriate
+    while (1) {
+        enable_interrupts();
+        ; // el scheduler lo matará
+    }
 }
 /* PAGE FAULT HANDLER */
 
@@ -169,9 +188,9 @@ void irq_handler(registers reg, uint32_t intr_no, uint32_t err_code, error_state
     //     // kprintf("Switching tasks\n");
     // }
 
-    if(intr_no >= 8)
+    if (intr_no >= 8)
         outb(0xA0, 0x20);
-	outb(PIC_EOI, PIC1_COMMAND);
+    outb(PIC_EOI, PIC1_COMMAND);
 
     switch (intr_no)
     {

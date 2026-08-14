@@ -55,6 +55,13 @@ void    vmalloc_init(void);
 void   *vmalloc(uint32_t size);
 
 /*
+ * vstrdup - duplicate a NUL-terminated string via vmalloc().
+ *
+ * Returns a vmalloc()'d copy of @s, or NULL on failure.
+ */
+void   *vstrdup(const char *s);
+
+/*
  * vfree - release a vmalloc() allocation.
  *
  * Unmaps every page in the region and returns all physical frames to

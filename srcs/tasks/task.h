@@ -26,6 +26,15 @@ typedef struct child_list
     struct child_list *next;
 } child_list_t;
 
+struct rseq {
+    uint32_t cpu_id_start;
+    uint32_t cpu_id;
+    uint64_t rseq_cs;
+    uint32_t flags;
+    uint32_t node_id;
+    uint32_t mm_cid;
+} __attribute__((packed));
+
 typedef struct task_struct
 {
     cpu_state_t cpu;
@@ -69,6 +78,12 @@ typedef struct task_struct
     file_t fd_pointers[MAX_FDS];
     bool fd_table[MAX_FDS];
 
+    uint32_t brk_start;
+    uint32_t brk_current;
+
+    void* rseq_ptr;
+    char** argv;
+    int argc;
     /* missing fields but untill it'll not work makes no sense to add them */    
 } task_t;
 
@@ -79,18 +94,20 @@ task_t* get_task_by_pid(pid_t pid);
 task_t* get_current_task();
 void kill_task();
 pid_t _waitpid(pid_t pid, int *status, int options);
+pid_t _getpid(void);
+int m_get_scheduler_running(void);
+void schedule_task_sleep(task_t* task, uint64_t seconds);
+
+void create_user_task_at(uint32_t entry_addr, const char *name, void (*on_exit)(void), page_directory_t* _task_dir, uint32_t heap_start, char* const argv[], char* const envp[]);
 
 void _exit(int status);
 
 pid_t _fork(iret_regs_t* parent_frame);
 
 void start_user();
-#warning "If this is meant to be used, ensure the definition of externs"
 void schedule(void);
-extern size_t TASK_KERNEL_STACK_OFFSET;
-extern size_t TASK_ENV_OFFSET;
-extern size_t TASK_PAGE_DIR_OFFSET;
-extern size_t TASK_ESP_OFFSET;
+/* Field offsets used by asm are computed via offsetof() in task_offsets.h,
+ * which supersedes the extern globals that used to live here. */
 // extern task_t* current_task;
 
 #endif

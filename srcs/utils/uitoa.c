@@ -5,11 +5,6 @@ void uitoa(unsigned int value, char *str, int base)
     char *ptr;
     char *low;
 
-    if (value < 0 && base == 10)
-    {
-        *str++ = '-';
-        value = -value;
-    }
     rc = ptr = str;
 
     *ptr++ = '\0';

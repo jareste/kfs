@@ -1,6 +1,7 @@
 #include "task.h"
 #include "../memory/memory.h"
 #include "../memory/vmm.h"
+#include "../memory/pmm.h"
 #include "../utils/utils.h"
 #include "../utils/stdint.h"
 #include "../display/display.h"
@@ -11,10 +12,10 @@
 #include "../utils/queue.h"
 #include "../sockets/socket.h"
 #include "../display/tty/tty.h"
+#include "elf.h"
 
 #define STACK_SIZE 4096
 #define MAX_ACTIVE_TASKS 100
-#define USER_STACK_SIZE 4096
 
 typedef struct __attribute__((packed))
 {
@@ -28,7 +29,7 @@ typedef struct __attribute__((packed))
 void kernel_main();
 void task_1(void);
 void task_1_exit();
-static void task_exit_pid(pid_t task_id);
+static void task_exit_pid(pid_t task_id) __attribute__((unused));
 static void task_exit_task(task_t* task, int singal);
 extern void switch_context(task_t *prev, task_t *next);
 extern void switch_context_to_user(task_t *prev, task_t *next);
@@ -40,7 +41,7 @@ static command_t commands[] = {
     {NULL, NULL, NULL}
 };
 
-static char* default_envp[] = {
+static char* default_envp[] __attribute__((unused)) = {
     "PATH=/bin:/usr/bin",
     "HOME=/",
     "USER=root",
@@ -48,7 +49,7 @@ static char* default_envp[] = {
     NULL
 };
 
-static uint8_t user_code[] =
+static uint8_t user_code[] __attribute__((unused)) =
 {
     // write(1, msg, 10)
     0xB8, 0x04, 0x00, 0x00, 0x00,   // mov eax, 4
@@ -64,7 +65,7 @@ static uint8_t user_code[] =
 };
 
 
-static uint8_t user_msg[] = "User task\n";
+static uint8_t user_msg[] __attribute__((unused)) = "User task\n";
 
 /* Stub for exiting user tasks */
 static uint8_t exit_stub[] =
@@ -75,7 +76,7 @@ static uint8_t exit_stub[] =
     0xEB, 0xFE,                      // jmp $ (por si acaso)
 };
 
-static uint32_t *saved_kernel_esp = NULL;
+static uint32_t *saved_kernel_esp __attribute__((unused)) = NULL;
 static uint32_t m_let_scheduler_run = 0;
 task_t* current_task = NULL;
 static task_t* task_list = NULL;
@@ -160,7 +161,7 @@ void free_finished_tasks()
         kfree((void*)to_free->stack);
     // if (to_free->stub_page)
     //     vfree((void*)to_free->stub_page);
-#warning "This might not be working, check it out"
+    /* TODO: "This might not be working, check it out" */
     if (to_free->page_dir)
     {
         for (int32_t i = 0; i < 1024; i++)
@@ -255,6 +256,7 @@ pid_t _wait(int* status)
 
 pid_t _waitpid(pid_t pid, int *status, int options)
 {
+    (void)options;
     task_t *child = get_task_by_pid(pid);
     if (!child || child->parent != current_task)
         return -1;
@@ -269,12 +271,61 @@ pid_t _waitpid(pid_t pid, int *status, int options)
     return pid;
 }
 
+int sys_wait4(pid_t pid, int *status, int options, void *rusage)
+{
+    (void)rusage;
+    task_t *current = get_current_task();
+
+    if (pid == -1)
+    {
+        while (1)
+        {
+            task_t *t = task_list;
+            do
+            {
+                if (t->parent == current && t->state == TASK_ZOMBIE)
+                {
+                    if (status)
+                        *status = t->exit_status;
+                    pid_t ret = t->pid;
+                    task_exit_task(t, t->exit_status);
+                    return ret;
+                }
+                t = t->next;
+            } while (t != task_list);
+
+            int has_children = 0;
+            t = task_list;
+            do
+            {
+                if (t->parent == current)
+                    has_children = 1;
+                t = t->next;
+            } while (t != task_list);
+
+            if (!has_children)
+                return -1;
+
+            if (options & 1) // WNOHANG = 1
+                return 0;
+
+            current->state = TASK_WAITING;
+            while (current->state == TASK_WAITING)
+                enable_interrupts();
+        }
+    }
+
+    return _waitpid(pid, status, options);
+}
+
 task_t* get_task_by_pid(pid_t pid)
 {
     task_t *current = task_list;
+    if (!current)
+        return NULL;
     do
     {
-        if (current->pid == pid)
+        if (current->pid == (uint32_t)pid)
             return current;
         current = current->next;
     } while (current != task_list);
@@ -311,7 +362,9 @@ void set_run_scheduler(int value)
     m_let_scheduler_run = value;
 }
 
-#warning "I use this function as a kind of lock to prevent scheduler from running in critical sections, but maybe it would be better to implement a more robust locking mechanism."
+/* TODO: this function is used as a kind of lock to prevent the scheduler from
+ * running in critical sections, but maybe it would be better to implement a
+ * more robust locking mechanism. */
 void pause_scheduler(int pause)
 {
     static int prev_value = 0;
@@ -325,6 +378,11 @@ void pause_scheduler(int pause)
         m_let_scheduler_run = prev_value;
         prev_value = 0;
     }
+}
+
+int m_get_scheduler_running()
+{
+    return m_let_scheduler_run;
 }
 
 uint32_t timer_schedule(uint32_t *iframe_esp)
@@ -365,6 +423,13 @@ uint32_t timer_schedule(uint32_t *iframe_esp)
     {
         gdt_set_entry(TLS_GDT_ENTRY, next->tls_base, 0xFFFFF, 0xF2, 0xC0);
         register_gdt();
+    }
+
+    if (next->rseq_ptr)
+    {
+        struct rseq *r = (struct rseq*)next->rseq_ptr;
+        r->cpu_id_start = 0;
+        r->cpu_id = 0;
     }
     
     __asm__ volatile("mov %0, %%gs" :: "r"(next->gs));
@@ -435,6 +500,7 @@ static void task_exit_pid(pid_t task_id)
 
 /* Cb function to be called once a task returns
 */
+static void task_exit() __attribute__((unused));
 static void task_exit()
 {
     task_exit_task(current_task, 0);
@@ -442,7 +508,12 @@ static void task_exit()
 
 void _exit(int status)
 {
-    task_exit_task(current_task, status);
+    task_t *task = current_task;
+    
+    if (task->parent && task->parent->state == TASK_WAITING)
+        task->parent->state = TASK_READY;
+    
+    task_exit_task(task, status);
 }
 
 void kill_task(int signal)
@@ -482,7 +553,10 @@ void fork_init_fds(task_t *child, task_t *parent)
             continue;
         memcpy(&child->fd_pointers[i], &parent->fd_pointers[i], sizeof(file_t));
         child->fd_pointers[i].ref_count++;
-#warning could be an issue as each file_t might have pointers to other structures that also need ref counting, but for now it works as is because we only have tty devices that don't have such pointers, just keep it in mind if you add new types of file_t in the future.
+        /* TODO: could be an issue as each file_t might have pointers to other
+         * structures that also need ref counting, but for now it works as is
+         * because we only have tty devices that don't have such pointers;
+         * keep it in mind if you add new types of file_t in the future. */
     }
 }
 
@@ -542,6 +616,7 @@ void create_task(void (*entry)(void), char* name, void (*on_exit)(void))
     task->cpu.esp_ = (uint32_t)stack; // Point to the simulated interrupt frame
     task->state = TASK_READY;
     task->kernel_stack = (uintptr_t)(stack + STACK_SIZE / sizeof(uint32_t));
+    task->kernel_stack_base = (uintptr_t)kernel_stack;
     task->stack = 0;
     memcpy(task->name, name, strlen(name) > 15 ? 15 : strlen(name));
     task->name[strlen(name) > 15 ? 15 : strlen(name)] = '\0';
@@ -556,6 +631,127 @@ void create_task(void (*entry)(void), char* name, void (*on_exit)(void))
     memset(task->fd_table, 0, sizeof(task->fd_table));
     init_signals(task);
     add_new_task(task);
+}
+
+#define PROT_NONE  0x0
+#define PROT_READ  0x1
+#define PROT_WRITE 0x2
+#define PROT_EXEC  0x4
+
+int sys_mprotect(uint32_t addr, size_t len, int prot)
+{
+    (void)addr; (void)len; (void)prot;
+    return 0;
+}
+
+#define MAP_ANONYMOUS 0x20
+#define MAP_PRIVATE   0x02
+
+void* sys_mmap2(uint32_t addr, size_t length, int prot, int flags, int fd, uint32_t pgoffset)
+{
+    task_t *task = get_current_task();
+    uint32_t pa;
+    uint32_t va;
+    uint32_t a;
+
+    (void)prot; (void)fd; (void)pgoffset;
+
+    if (!(flags & MAP_ANONYMOUS))
+        return (void*)-1;
+
+    if (length == 0)
+        return (void*)-1;
+
+    length = PAGE_ALIGN(length);
+
+    if (addr == 0)
+    {
+        va = PAGE_ALIGN(task->brk_current);
+        task->brk_current = va + length;
+    }
+    else
+    {
+        va = addr & 0xFFFFF000;
+    }
+
+    for (a = va; a < va + length; a += PAGE_SIZE)
+    {
+        if (vmm_get_physical(task->page_dir, a) != 0)
+            continue;
+        pa = pmm_alloc_frame();
+        memset((void*)pa, 0, PAGE_SIZE);
+        vmm_map_page(task->page_dir, a, pa, PAGE_USER_RW);
+    }
+
+    return (void*)va;
+}
+
+int sys_munmap(void *addr, size_t length)
+{
+    (void)addr; (void)length;
+    if (addr == NULL || length == 0)
+        return -1;
+    
+    
+    return 0;
+}
+
+int sys_brk(uint32_t new_brk)
+{
+    task_t *task = get_current_task();
+
+    if (new_brk == 0)
+    {
+        return task->brk_current;
+    }
+
+    if (new_brk < task->brk_start)
+        return task->brk_current;
+
+    uint32_t old_brk = task->brk_current;
+    uint32_t new_brk_aligned = PAGE_ALIGN(new_brk);
+    uint32_t old_brk_aligned = PAGE_ALIGN(old_brk);
+
+    for (uint32_t va = old_brk_aligned; va < new_brk_aligned; va += PAGE_SIZE)
+    {
+        if (vmm_get_physical(task->page_dir, va) != 0)
+            continue;
+        uint32_t pa = pmm_alloc_frame();
+        vmm_map_page(task->page_dir, va, pa, PAGE_USER_RW);
+    }
+
+    task->brk_current = new_brk;
+    return new_brk;
+}
+
+int sys_rseq(void *rseq_ptr, uint32_t rseq_len, int flags, uint32_t sig)
+{
+    (void)flags; (void)sig;
+    if (!rseq_ptr)
+        return -22; // EINVAL
+    if (rseq_len < 32)
+        return -22;
+
+    task_t *task = get_current_task();
+    
+    // Si ya está registrado, error
+    if (task->rseq_ptr != NULL)
+        return -22;
+
+    struct rseq *r = (struct rseq*)rseq_ptr;
+    
+    // cpu_id_start y cpu_id = 0 (solo tenemos 1 CPU)
+    r->cpu_id_start = 0;
+    r->cpu_id = 0;
+    r->rseq_cs = 0;
+    r->flags = 0;
+    r->node_id = 0;
+    r->mm_cid = 0;
+
+    // Guarda el puntero en la tarea para actualizarlo en context switch
+    task->rseq_ptr = rseq_ptr;
+
+    return 0;
 }
 
 pid_t _do_fork(iret_regs_t* parent_frame)
@@ -662,6 +858,7 @@ void task_1_exit()
 
 void task_1_sighandler(int signal)
 {
+    (void)signal;
     puts_color("Task 1: Signal received\n", GREEN);
 }
 
@@ -732,7 +929,6 @@ void socket_2()
     char buffer[10];
     int return_value;
     char* err_str = "Error reading\n";
-    char* read_str = "Read: ";
 
     sys_sleep(10);
     sock = sys_connect("/foo/bar");
@@ -764,6 +960,10 @@ void socket_2()
 
 }
 
+/* Deliberately unbounded recursion, used to exercise stack-overflow /
+ * guard-page handling; GCC would otherwise flag it as a bug. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winfinite-recursion"
 void recursion()
 {
     static unsigned int i = 0;
@@ -771,6 +971,7 @@ void recursion()
     kprintf("Recursion %d\n", i++);
     recursion();
 }
+#pragma GCC diagnostic pop
 
 void test_recursion(void)
 {
@@ -786,11 +987,8 @@ void task_read()
     char* buffer_filler = "Task read\n";
     memcpy(buffer, buffer_filler, 10);
     buffer[10] = '\0';
-    char* read_str = "Read :";
     char* err_str = "Error reading\n";
-    char* cmp_buff = "Task read\n";
     char* filename = "/boot/task_read";
-    char* pointer = "%p '%s'\n";
     char* fd_str = "fd: %d\n";
 
     fd_str = "fd: '%d'\n";
@@ -854,12 +1052,86 @@ void task_read()
 #define USER_STACK_BASE  (USER_STACK_TOP - USER_STACK_SIZE)
 #define USER_STUB_ADDR   0xBF000000u
 
-void create_user_task_at(uint32_t entry_addr, char *name, void (*on_exit)(void), page_directory_t* _task_dir)
+void build_user_stack(uint32_t *usp_out, const char *name, 
+                      char * const argv[], char * const envp[],
+                      page_directory_t *task_dir)
+{
+    // Cambia al directorio del task para escribir
+    // (asumimos que ya estamos en task_dir)
+    (void)task_dir;
+
+    char *stack_top = (char*)USER_STACK_TOP;
+    char *str_ptr = stack_top;  // escribe strings desde arriba hacia abajo
+
+    // Cuenta argv y envp
+    int argc = 0;
+    if (argv) while (argv[argc]) argc++;
+    
+    int envc = 0;
+    if (envp) while (envp[envc]) envc++;
+
+    // Copia las strings al stack (de arriba hacia abajo)
+    // Primero envp strings
+    char *envp_strs[64];
+    for (int i = envc - 1; i >= 0; i--) {
+        size_t len = strlen(envp[i]) + 1;
+        str_ptr -= len;
+        memcpy(str_ptr, envp[i], len);
+        envp_strs[i] = str_ptr;
+    }
+
+    // Luego argv strings
+    char *argv_strs[64];
+    // argv[0] siempre es el nombre del binario
+    {
+        size_t len = strlen(name) + 1;
+        str_ptr -= len;
+        memcpy(str_ptr, name, len);
+        argv_strs[0] = str_ptr;
+    }
+    for (int i = 1; i < argc; i++) {
+        size_t len = strlen(argv[i]) + 1;
+        str_ptr -= len;
+        memcpy(str_ptr, argv[i], len);
+        argv_strs[i] = str_ptr;
+    }
+
+    // Alinea a 16 bytes
+    str_ptr = (char*)((uint32_t)str_ptr & ~0xF);
+
+    // Ahora construye el array de punteros (hacia abajo desde str_ptr)
+    uint32_t *usp = (uint32_t*)str_ptr;
+
+    // auxv terminator
+    *--usp = 0;  // AT_NULL value
+    *--usp = 0;  // AT_NULL type
+
+    // envp array (NULL terminated)
+    *--usp = 0;  // NULL terminator
+    for (int i = envc - 1; i >= 0; i--)
+        *--usp = (uint32_t)envp_strs[i];
+
+    // argv array (NULL terminated)
+    *--usp = 0;  // NULL terminator
+    for (int i = argc - 1; i >= 0; i--)
+        *--usp = (uint32_t)argv_strs[i];
+    // argv[0] = nombre del binario
+    if (argc == 0)
+        *--usp = (uint32_t)argv_strs[0];
+
+    // argc
+    // Si argv fue NULL, argc real es 1 (solo argv[0] = nombre)
+    *--usp = (argc == 0) ? 1 : argc;
+
+    *usp_out = (uint32_t)usp;
+}
+
+void create_user_task_at(uint32_t entry_addr, const char *name, void (*on_exit)(void), page_directory_t* _task_dir, uint32_t heap_start, char* const argv[], char* const envp[])
 {
     task_t *task = kmalloc(sizeof(task_t));
     memset(task, 0, sizeof(task_t));
 
-    uint32_t *kernel_stack_base = kmalloc(STACK_SIZE);
+    uint32_t *kernel_stack_base = kmalloc(STACK_SIZE*3);
     uint32_t *kernel_stack_top  = kernel_stack_base + STACK_SIZE / sizeof(uint32_t);
 
     page_directory_t *task_dir = _task_dir ? _task_dir : vmm_current_directory();
@@ -879,16 +1151,12 @@ void create_user_task_at(uint32_t entry_addr, char *name, void (*on_exit)(void),
 
     memcpy((void*)USER_STUB_ADDR, exit_stub, sizeof(exit_stub));
 
-    uint32_t *usp = (uint32_t*)USER_STACK_TOP;
-    usp = (uint32_t*)((uint32_t)usp & ~0xF);
+uint32_t usp;
 
-    *--usp = 0; /* auxv AT_NULL value */
-    *--usp = 0; /* auxv AT_NULL type */
-    *--usp = 0; /* envp NULL terminator */
-    *--usp = 0; /* argv NULL terminator */
-    *--usp = 0; /* argc = 0 */
+    build_user_stack(&usp, name, argv, envp, task_dir);
 
-    vmm_switch_directory(prev_dir);
+
+vmm_switch_directory(prev_dir);
 
     uint32_t *ksp = kernel_stack_top;
     *--ksp = 0x2B; /* SS (user) */
@@ -909,6 +1177,10 @@ void create_user_task_at(uint32_t entry_addr, char *name, void (*on_exit)(void),
     task->state = TASK_READY;
     task->is_user = true;
     task->on_exit = on_exit;
+    
+    task->brk_start   = heap_start;
+    task->brk_current = heap_start;
+
     task->uid = 1000; task->euid = 1000; task->gid = 1000;
     task->screen_echo = true;
 
@@ -950,21 +1222,41 @@ void kshell();
 void ide_task_main(void);
 void start_foo_tasks(void)
 {
-    create_task(kshell, "kshell", NULL);
+    // create_task(kshell, "kshell", NULL);
     create_task(ide_task_main, "ide", NULL);
 
-    create_task(task_wait, "task_wait", NULL);
-    create_task(task_1, "task_1", task_1_exit);
-    create_task(task_read, "task_read", NULL);
-    create_task(socket_1, "socket_1", NULL);
-    create_task(socket_2, "socket_2", NULL);
-    exec_bin("/hello");
-    exec_bin("/hello");
-    exec_bin("/hello2");
-    exec_bin("/hello2");
-    exec_bin("/hello2");
-    exec_bin("/hello2");
-    insmod("/kb_mod.o");
+    // create_task(task_wait, "task_wait", NULL);
+    // create_task(task_1, "task_1", task_1_exit);
+    // create_task(task_read, "task_read", NULL);
+    // create_task(socket_1, "socket_1", NULL);
+    // create_task(socket_2, "socket_2", NULL);
+    // exec_bin("/hello");
+    // exec_bin("/hello");
+    // exec_bin("/hello2");
+    // exec_bin("/hello2");
+    // exec_bin("/hello2");
+    // exec_bin("/hello2");
+        static char* busybox_argv[] = {
+        "busybox",
+        "sh",
+        NULL
+    };
+    static char *default_envp[] = {
+    "PATH=/bin:/usr/bin",
+    "HOME=/",
+    // "TERM=linux",
+    NULL
+};
+
+    // static char* busybox_echo_argv[] = {
+    //     "busybox",
+    //     "echo",
+    //     "hola",
+    //     NULL
+    // };
+    exec_bin("busybox", busybox_argv, default_envp);
+    // exec_bin("busybox", busybox_echo_argv, default_envp);
+    // insmod("/kb_mod.o");
 
     to_free = NULL;
 }

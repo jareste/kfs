@@ -9,7 +9,7 @@ typedef struct
     uint32_t tv_nsec;
 } timespec_t;
 
-typedef struct tm
+struct tm
 {
     uint32_t tm_sec;   /* seconds */
     uint32_t tm_min;   /* minutes */
@@ -40,5 +40,7 @@ void set_system_time(const timespec_t* ts);
 time_t _time(time_t* tloc);
 
 uint32_t get_tick_count();
+
+void print_date();
 
 #endif
