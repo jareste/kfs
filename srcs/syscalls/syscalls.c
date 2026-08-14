@@ -604,6 +604,7 @@ void init_syscalls()
     syscall_table[SYS_READ] = (syscall_entry_t){ .ret_value_entry = RET_SIZE, .num_args = 3, .handler.handler = (void*)_sys_read };
     syscall_table[SYS_GETDENTS64] = (syscall_entry_t){ .ret_value_entry = RET_SIZE, .num_args = 3, .handler.handler = (void*)_sys_getdents64 };
     syscall_table[SYS_OPEN] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)_sys_open };
+    syscall_table[SYS_CHMOD] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_chmod };
     syscall_table[SYS_CLOSE] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)_sys_close, };
     syscall_table[SYS_GETPID] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 0, .handler.handler = (void*)sys_get_pid };
     syscall_table[SYS_SIGNAL] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_signal };

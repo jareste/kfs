@@ -940,6 +940,22 @@ int sys_open(const char *path, int flags)
     return fd;
 }
 
+int sys_chmod(const char *path, int mode)
+{
+    uint32_t inode_num;
+    struct ext2_inode inode;
+
+    if (ext2_resolve_path(path, &inode_num) < 0)
+        return -2; // -ENOENT
+
+    ext2_read_inode(inode_num, &inode);
+
+    inode.i_mode = (inode.i_mode & 0xF000) | (mode & 0x0FFF);
+    ext2_write_inode(inode_num, &inode);
+
+    return 0;
+}
+
 int sys_close(int fd, task_t *task)
 {
     // task_t* current;

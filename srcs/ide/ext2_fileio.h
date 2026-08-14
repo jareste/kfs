@@ -8,12 +8,18 @@
 #include "ext2.h"
 
 #define MAX_FDS 32
-#define O_RDONLY 0
-#define O_WRONLY 1
-#define O_RDWR 2
-#define O_CREAT 4
-#define O_TRUNC 8
-#define O_APPEND 16
+
+#define O_RDONLY    00
+#define O_WRONLY    01
+#define O_RDWR      02
+#define O_CREAT     0100
+#define O_EXCL      0200
+#define O_NOCTTY    0400
+#define O_TRUNC     01000
+#define O_APPEND    02000
+#define O_NONBLOCK  04000
+#define O_DIRECTORY 0200000
+#define O_CLOEXEC   02000000
 #define FILE_MODE    0x8000   // Regular file (S_IFREG)
 #define DIR_MODE     0x4000   // Directory (S_IFDIR)
 #define DEVICE_MODE  0x2000   // Character device (S_IFCHR)
@@ -71,6 +77,7 @@ size_t ext2_fwrite(ext2_FILE *stream, const void *ptr, size_t size);
 int ext2_fclose(ext2_FILE *stream);
 
 int sys_open(const char *path, int flags);
+int sys_chmod(const char *path, int mode);
 int sys_close(int fd, task_t* current);
 ssize_t sys_read(int fd, void *buf, size_t count);
 ssize_t sys_lseek(int fd, ssize_t offset, int whence);
