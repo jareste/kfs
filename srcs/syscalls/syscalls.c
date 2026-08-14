@@ -120,6 +120,17 @@ int _sys_read(int fd, char* buf, size_t count)
     return sys_read(fd, buf, count);
 }
 
+int _sys_getdents64(int fd, void *dirp, size_t count)
+{
+    if (!dirp || count == 0)
+        return -1;
+
+    if (fd < 0)
+        return -1;
+
+    return sys_getdents64(fd, dirp, count);
+}
+
 int _sys_open(const char* path, int flags)
 {
     // kprintf("Syscall: open(%s, %d)\n", path, flags);
@@ -257,6 +268,27 @@ int sys_rt_sigaction(int sig, void *act, void *oldact, size_t sigsetsize)
 {
     (void)sig; (void)act; (void)oldact; (void)sigsetsize;
     return 0;
+}
+
+/* no-op/succeed as musl/busybox tries to use it, but as we don't track a process name field, we just ignore it.
+*/
+int sys_prctl(int option, unsigned long arg2, unsigned long arg3, unsigned long arg4, unsigned long arg5)
+{
+#define PR_SET_NAME  15
+#define PR_GET_NAME  16
+
+    (void)arg3; (void)arg4; (void)arg5;
+    switch (option)
+    {
+        case PR_SET_NAME:
+            return 0;
+        case PR_GET_NAME:
+            if (arg2)
+                memcpy((void*)arg2, get_current_task()->name, 16);
+            return 0;
+        default:
+            return -38; // -ENOSYS
+    }
 }
 
 int sys_readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz)
@@ -464,8 +496,9 @@ int syscall_handler(iret_regs_t* reg)
 
     if (syscall_number >= SYS_MAX_SYSCALL || syscall_table[syscall_number].handler.handler == NULL)
     {
+        /* Unimplemented syscall
+         */
         kprintf("Unknown syscall: %d\n", syscall_number);
-        kpanic("Invalid syscall number", 1);
         return -38; // -ENOSYS
     }
 
@@ -516,6 +549,7 @@ void init_syscalls()
     syscall_table[SYS_EXIT] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_exit };
     syscall_table[SYS_WRITE] = (syscall_entry_t){ .ret_value_entry = RET_SIZE, .num_args = 3, .handler.handler = (void*)_sys_write, };
     syscall_table[SYS_READ] = (syscall_entry_t){ .ret_value_entry = RET_SIZE, .num_args = 3, .handler.handler = (void*)_sys_read };
+    syscall_table[SYS_GETDENTS64] = (syscall_entry_t){ .ret_value_entry = RET_SIZE, .num_args = 3, .handler.handler = (void*)_sys_getdents64 };
     syscall_table[SYS_OPEN] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)_sys_open };
     syscall_table[SYS_CLOSE] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)_sys_close, };
     syscall_table[SYS_GETPID] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 0, .handler.handler = (void*)sys_get_pid };
@@ -524,6 +558,7 @@ void init_syscalls()
     syscall_table[SYS_EXECVE] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 3, .handler.handler = (void*)sys_execve };
     syscall_table[SYS_NANOSLEEP] = (syscall_entry_t){ .ret_value_entry = RET_VOID, .num_args = 1, .handler.handler = (void*)sys_usleep };
     syscall_table[SYS_SLEEP] = (syscall_entry_t){ .ret_value_entry = RET_VOID, .num_args = 1, .handler.handler = (void*)sys_sleep };
+    syscall_table[SYS_PRCTL] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 5, .handler.handler = (void*)sys_prctl };
     syscall_table[SYS_TIME] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_time };
     syscall_table[SYS_SET_THREAD_AREA] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_set_thread_area };
     syscall_table[SYS_SET_TID_ADDRESS] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_set_tid_address };

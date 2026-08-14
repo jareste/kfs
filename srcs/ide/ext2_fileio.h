@@ -37,7 +37,7 @@ typedef struct ext2_FILE
     int mode;                   /* 0=read, 1=write (for simplicity) */
 } ext2_FILE;
 
-typedef enum { FD_FILE = 0, FD_SOCKET, FD_MODULE, FD_TTY } fd_type_t;
+typedef enum { FD_FILE = 0, FD_SOCKET, FD_MODULE, FD_TTY, FD_DIR } fd_type_t;
 
 /* With fileops i can directly dispatch the read/write/close operations
  * allowing me to use the same struct for files, modules, stdin/stdout, etc.
@@ -75,6 +75,7 @@ int sys_close(int fd, task_t* current);
 ssize_t sys_read(int fd, void *buf, size_t count);
 ssize_t sys_lseek(int fd, ssize_t offset, int whence);
 ssize_t sys_write(int fd, const void *buf, size_t count);
+ssize_t sys_getdents64(int fd, void *dirp, size_t count);
 
 
 int create_device_node(const char *dir, const char *name, module_t *module);

@@ -112,6 +112,7 @@ typedef enum {
     SYS_GETTIMEOFDAY = 169,
     SYS_NANOSLEEP = 170,
     SYS_SLEEP = 171,
+    SYS_PRCTL = 172,
     SYS_RT_SIGACTION = 174,
     SYS_SIGPROCMASK = 175,
     SYS_GETCWD = 183,
@@ -123,6 +124,7 @@ typedef enum {
     SYS_SETUID32 = 213,
     SYS_SETGID32 = 214,
     SYS_GETRUSAGE = 217,
+    SYS_GETDENTS64 = 220,
     SYS_FADVISE64 = 221,
     SYS_SET_THREAD_AREA = 243,
     SYS_EXIT_GROUP = 252,
@@ -156,6 +158,7 @@ int syscall_handler(iret_regs_t* reg);
 
 void init_syscalls();
 
+int sys_prctl(int option, unsigned long arg2, unsigned long arg3, unsigned long arg4, unsigned long arg5);
 int sys_get_pid();
 int sys_kill(uint32_t pid, uint32_t signal);
 int sys_signal(uint32_t pid, signal_handler_t hand);

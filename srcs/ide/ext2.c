@@ -696,15 +696,21 @@ size_t ext2_fread(ext2_FILE *stream, void *ptr, size_t size)
             kfree(l2_buf);
         }
 
-        if (block_num == 0) break;
-
-        ext2_read_block(block_num, blockbuf);
-
         to_copy = EXT2_BLOCK_SIZE - block_offset;
         if (to_copy > size - bytes_read)
             to_copy = size - bytes_read;
 
-        memcpy(out + bytes_read, blockbuf + block_offset, to_copy);
+        if (block_num == 0)
+        {
+            /* Sparse hole: ext2 defines unallocated blocks within a file's
+             * range as implicitly zero-filled, not as end-of-file. */
+            memset(out + bytes_read, 0, to_copy);
+        }
+        else
+        {
+            ext2_read_block(block_num, blockbuf);
+            memcpy(out + bytes_read, blockbuf + block_offset, to_copy);
+        }
         bytes_read += to_copy;
     }
 
@@ -833,6 +839,27 @@ int sys_open(const char *path, int flags)
         return -1;
     }
 
+    {
+        /* handle directory case */
+        uint32_t dir_inode_num;
+        if (ext2_resolve_path(path, &dir_inode_num) == 0)
+        {
+            struct ext2_inode dir_inode;
+            ext2_read_inode(dir_inode_num, &dir_inode);
+            if (dir_inode.i_mode & DIR_MODE)
+            {
+                memset(&current->fd_pointers[fd], 0, sizeof(file_t));
+                current->fd_pointers[fd].type = FD_DIR;
+                current->fd_pointers[fd].fp = (void*)(uintptr_t)dir_inode_num;
+                current->fd_pointers[fd].offset = 0;
+                current->fd_pointers[fd].flags = flags;
+                current->fd_pointers[fd].ref_count = 1;
+                current->fd_table[fd] = true;
+                return fd;
+            }
+        }
+    }
+
     /* For simplicity, if O_WRONLY or O_RDWR with O_CREAT is specified,
        choose an appropriate mode string */
     if (flags & O_CREAT)
@@ -957,6 +984,9 @@ ssize_t sys_read(int fd, void *buf, size_t count)
 
     file_obj = &current->fd_pointers[fd];
 
+    if (file_obj->type == FD_DIR)
+        return -21; // -EISDIR
+
     if (file_obj->type == FD_MODULE)
     {
         module_t *mod = file_obj->fp;
@@ -1005,6 +1035,99 @@ ssize_t sys_read(int fd, void *buf, size_t count)
     // n = ext2_fread(buf, 1, count, file_obj->file);
     // file_obj->offset = file_obj->file->pos;
     return n;
+}
+
+struct linux_dirent64
+{
+    uint64_t d_ino;
+    int64_t  d_off;
+    uint16_t d_reclen;
+    uint8_t  d_type;
+    char     d_name[];
+};
+
+#define DT_UNKNOWN 0
+#define DT_REG     8
+#define DT_DIR     4
+
+static uint8_t ext2_file_type_to_dt(uint8_t ext2_file_type)
+{
+    switch (ext2_file_type)
+    {
+        case EXT2_FT_REG_FILE: return DT_REG;
+        case EXT2_FT_DIR:      return DT_DIR;
+        default:                return DT_UNKNOWN;
+    }
+}
+
+ssize_t sys_getdents64(int fd, void *dirp, size_t count)
+{
+    task_t *current = get_current_task();
+    file_t *file_obj;
+    uint8_t *blkbuf;
+    uint8_t *out;
+    size_t written;
+    uint32_t offset;
+    uint32_t inode_num;
+    struct ext2_inode dir;
+
+    if (fd < 0 || fd >= MAX_FDS || current->fd_table[fd] == false)
+        return -1;
+
+    file_obj = &current->fd_pointers[fd];
+    if (file_obj->type != FD_DIR)
+        return -20; // -ENOTDIR
+
+    inode_num = (uint32_t)(uintptr_t)file_obj->fp;
+    ext2_read_inode(inode_num, &dir);
+
+    /* Directories in this driver live entirely in their first data block
+     * (see ext2_cmd_ls) — matches the rest of the codebase's assumptions. */
+    blkbuf = kmalloc(EXT2_BLOCK_SIZE);
+    if (dir.i_block[0])
+        ext2_read_block(dir.i_block[0], blkbuf);
+    else
+        memset(blkbuf, 0, EXT2_BLOCK_SIZE);
+
+    out = (uint8_t*)dirp;
+    written = 0;
+    offset = file_obj->offset;
+
+    while (offset < EXT2_BLOCK_SIZE)
+    {
+        struct ext2_dir_entry *de = (struct ext2_dir_entry *)(blkbuf + offset);
+        if (de->rec_len == 0)
+            break;
+
+        if (de->inode != 0)
+        {
+            size_t namelen = de->name_len;
+            size_t reclen = ((size_t)&((struct linux_dirent64*)0)->d_name + namelen + 1 + 7) & ~7u;
+
+            if (written + reclen > count)
+                break; /* caller's buffer is full; resume here next call */
+
+            struct linux_dirent64 *out_de = (struct linux_dirent64 *)(out + written);
+            out_de->d_ino = de->inode;
+            out_de->d_reclen = reclen;
+            out_de->d_type = ext2_file_type_to_dt(de->file_type);
+            memcpy(out_de->d_name, de->name, namelen);
+            out_de->d_name[namelen] = '\0';
+
+            offset += de->rec_len;
+            out_de->d_off = offset;
+
+            written += reclen;
+        }
+        else
+        {
+            offset += de->rec_len;
+        }
+    }
+
+    file_obj->offset = offset;
+    kfree(blkbuf);
+    return written;
 }
 
 ssize_t sys_lseek(int fd, ssize_t offset, int whence)
