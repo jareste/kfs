@@ -11,8 +11,6 @@
 #include "../panic/kpanic.h"
 #include "ext2_fileio.h"
 
-extern int ide_read_sectors(uint32_t lba, uint8_t count, void *buffer);
-extern int ide_write_sectors(uint32_t lba, uint8_t count, void *buffer);
 
 /* --- Derived constants --- */
 #define SECTORS_PER_BLOCK (EXT2_BLOCK_SIZE / IDE_SECTOR_SIZE)
@@ -718,9 +716,135 @@ size_t ext2_fread(ext2_FILE *stream, void *ptr, size_t size)
     return bytes_read;
 }
 
+static uint32_t ext2_get_or_alloc_block(struct ext2_inode *inode, uint32_t block_index)
+{
+    uint32_t indirect_index;
+    uint32_t* indirect_buf;
+    uint32_t block_num;
+    uint32_t b;
+    uint32_t double_index;
+    uint32_t l1_index;
+    uint32_t l2_index;
+    uint32_t* l1_buf;
+    uint32_t* l2_buf;
+
+    if (block_index < 12)
+    {
+        if (inode->i_block[block_index] == 0)
+        {
+            b = ext2_allocate_block();
+            if (!b)
+                return 0;
+            inode->i_block[block_index] = b;
+            inode->i_blocks += EXT2_BLOCK_SIZE / 512;
+        }
+        return inode->i_block[block_index];
+    }
+
+    if (block_index < 12 + 256)
+    {
+        indirect_index = block_index - 12;
+        indirect_buf = kmalloc(EXT2_BLOCK_SIZE);
+        block_num;
+
+        if (inode->i_block[12] == 0)
+        {
+            b = ext2_allocate_block();
+            if (!b)
+            {
+                kfree(indirect_buf);
+                return 0;
+            }
+            inode->i_block[12] = b;
+            inode->i_blocks += EXT2_BLOCK_SIZE / 512;
+            memset(indirect_buf, 0, EXT2_BLOCK_SIZE);
+            ext2_write_block(inode->i_block[12], indirect_buf);
+        }
+        else
+        {
+            ext2_read_block(inode->i_block[12], (uint8_t*)indirect_buf);
+        }
+
+        block_num = indirect_buf[indirect_index];
+        if (block_num == 0)
+        {
+            block_num = ext2_allocate_block();
+            if (!block_num) { kfree(indirect_buf); return 0; }
+            indirect_buf[indirect_index] = block_num;
+            inode->i_blocks += EXT2_BLOCK_SIZE / 512;
+            ext2_write_block(inode->i_block[12], indirect_buf);
+        }
+        kfree(indirect_buf);
+        return block_num;
+    }
+
+    {
+        double_index = block_index - 12 - 256;
+        l1_index = double_index / 256;
+        l2_index = double_index % 256;
+        l1_buf = kmalloc(EXT2_BLOCK_SIZE);
+        l2_buf;
+        block_num;
+
+        if (inode->i_block[13] == 0)
+        {
+            b = ext2_allocate_block();
+            if (!b) { kfree(l1_buf); return 0; }
+            inode->i_block[13] = b;
+            inode->i_blocks += EXT2_BLOCK_SIZE / 512;
+            memset(l1_buf, 0, EXT2_BLOCK_SIZE);
+            ext2_write_block(inode->i_block[13], l1_buf);
+        }
+        else
+        {
+            ext2_read_block(inode->i_block[13], (uint8_t*)l1_buf);
+        }
+
+        l2_buf = kmalloc(EXT2_BLOCK_SIZE);
+        if (l1_buf[l1_index] == 0)
+        {
+            b = ext2_allocate_block();
+            if (!b) { kfree(l1_buf); kfree(l2_buf); return 0; }
+            l1_buf[l1_index] = b;
+            inode->i_blocks += EXT2_BLOCK_SIZE / 512;
+            ext2_write_block(inode->i_block[13], l1_buf);
+            memset(l2_buf, 0, EXT2_BLOCK_SIZE);
+            ext2_write_block(l1_buf[l1_index], l2_buf);
+        }
+        else
+        {
+            ext2_read_block(l1_buf[l1_index], (uint8_t*)l2_buf);
+        }
+
+        block_num = l2_buf[l2_index];
+        if (block_num == 0)
+        {
+            block_num = ext2_allocate_block();
+            if (!block_num) { kfree(l1_buf); kfree(l2_buf); return 0; }
+            l2_buf[l2_index] = block_num;
+            inode->i_blocks += EXT2_BLOCK_SIZE / 512;
+            ext2_write_block(l1_buf[l1_index], l2_buf);
+        }
+        kfree(l1_buf);
+        kfree(l2_buf);
+        return block_num;
+    }
+}
+
 size_t ext2_fwrite(ext2_FILE *stream, const void *ptr, size_t size)
 {
-    if (!stream) return 0;
+    uint32_t file_offset;
+    uint32_t block_index;
+    uint32_t block_offset;
+    uint32_t block_num;
+    uint8_t *blockbuf;
+    const uint8_t *in;
+    size_t bytes_written;
+    size_t to_copy;
+
+    if (!stream)
+        return 0;
+
     if (stream->mode != 1)
     {
         kprintf("ext2_fwrite: file not opened for writing\n");
@@ -729,40 +853,52 @@ size_t ext2_fwrite(ext2_FILE *stream, const void *ptr, size_t size)
 
     if (size == 0) return 0;
 
-    if (stream->inode.i_block[0] == 0)
+    blockbuf = kmalloc(EXT2_BLOCK_SIZE);
+    in = (const uint8_t*)ptr;
+    bytes_written = 0;
+
+    while (bytes_written < size)
     {
-        uint32_t new_block = ext2_allocate_block();
-        if (!new_block)
+        file_offset = stream->pos + bytes_written;
+        block_index = file_offset / EXT2_BLOCK_SIZE;
+        block_offset = file_offset % EXT2_BLOCK_SIZE;
+
+        block_num = ext2_get_or_alloc_block(&stream->inode, block_index);
+        if (block_num == 0)
         {
             kprintf("ext2_fwrite: no free block\n");
-            return 0;
+            break;
         }
-        stream->inode.i_block[0] = new_block;
-        stream->inode.i_blocks = 2;
+
+        to_copy = EXT2_BLOCK_SIZE - block_offset;
+        if (to_copy > size - bytes_written)
+            to_copy = size - bytes_written;
+
+        if (to_copy == EXT2_BLOCK_SIZE)
+        {
+            memcpy(blockbuf, in + bytes_written, to_copy);
+        }
+        else
+        {
+            /* Partial block: must preserve whatever we're not overwriting. */
+            ext2_read_block(block_num, blockbuf);
+            memcpy(blockbuf + block_offset, in + bytes_written, to_copy);
+        }
+        ext2_write_block(block_num, blockbuf);
+
+        bytes_written += to_copy;
     }
 
-    uint8_t blockbuf[EXT2_BLOCK_SIZE];
-    ext2_read_block(stream->inode.i_block[0], blockbuf);
+    kfree(blockbuf);
 
-    size_t space = EXT2_BLOCK_SIZE - stream->pos;
-    if (space < size)
-    {
-        size = space;
-    }
-
-    memcpy(blockbuf + stream->pos, ptr, size);
-
-    ext2_write_block(stream->inode.i_block[0], blockbuf);
-
-    stream->pos += size;
+    stream->pos += bytes_written;
     if (stream->pos > stream->inode.i_size)
     {
         stream->inode.i_size = stream->pos;
     }
     ext2_write_inode(stream->inode_num, &stream->inode);
 
-    // file_obj->offset = file_obj->fp->pos;
-    return size; /* number of "elements" written */
+    return bytes_written; /* number of bytes actually written */
 }
 
 int create_device_node(const char *dir, const char *name, module_t *module)

@@ -23,3 +23,13 @@ uint16_t inw(uint16_t port)
     __asm__ __volatile__("inw %1, %0" : "=a"(ret) : "Nd"(port));
     return ret;
 }
+
+void insw(uint16_t port, void *addr, uint32_t count)
+{
+    __asm__ __volatile__("cld; rep insw" : "+D"(addr), "+c"(count) : "d"(port) : "memory");
+}
+
+void outsw(uint16_t port, const void *addr, uint32_t count)
+{
+    __asm__ __volatile__("cld; rep outsw" : "+S"(addr), "+c"(count) : "d"(port) : "memory");
+}

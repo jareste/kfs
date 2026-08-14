@@ -24,8 +24,12 @@
 #define IDE_SECTOR_SIZE 512
 
 void ide_init();
-void ide_read_sector(uint32_t lba, uint16_t* buffer);
-void ide_write_sector(uint32_t lba, uint16_t* buffer);
+void ide_read_sector_monotask(uint32_t lba, uint16_t* buffer);
+void ide_write_sector_monotask(uint32_t lba, uint16_t* buffer);
+void ide_read_sectors_monotask(uint32_t lba, uint8_t count, uint16_t* buffer);
+void ide_write_sectors_monotask(uint32_t lba, uint8_t count, uint16_t* buffer);
+int  ide_read_sectors(uint32_t lba, uint8_t count, void *buffer);
+int  ide_write_sectors(uint32_t lba, uint8_t count, void *buffer);
 void ide_irq_handler();
 void ide_demo();
 

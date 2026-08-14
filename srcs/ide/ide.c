@@ -85,69 +85,82 @@ static void ide_select_drive(uint32_t lba)
     outb(IDE_DRIVE_SEL, 0xE0 | ((lba >> 24) & 0x0F));
 }
 
-void ide_read_sector_monotask(uint32_t lba, uint16_t* buffer)
+void ide_read_sectors_monotask(uint32_t lba, uint8_t count, uint16_t* buffer)
 {
-    uint8_t status = inb(IDE_STATUS); /* read to clear pending status/IRQ */
-    (void)status;
+    uint8_t s;
+
     disable_interrupts();
-    
+
     ide_wait_nonbusy();
     ide_select_drive(lba);
-    
-    outb(IDE_SECT_COUNT, 1);
+
+    outb(IDE_SECT_COUNT, count);
     outb(IDE_LBA_LOW, lba & 0xFF);
     outb(IDE_LBA_MID, (lba >> 8) & 0xFF);
     outb(IDE_LBA_HIGH, (lba >> 16) & 0xFF);
     outb(IDE_CMD, IDE_CMD_READ);
-    
-    enable_interrupts();
-    sema_wait(&ide_sem);
-    disable_interrupts();
 
-    if (inb(IDE_STATUS) & IDE_STATUS_ERR)
+    for (s = 0; s < count; s++)
     {
-        kpanic("IDE read error", 1);
+        enable_interrupts();
+        sema_wait(&ide_sem);
+        disable_interrupts();
+
+        if (inb(IDE_STATUS) & IDE_STATUS_ERR)
+        {
+            kpanic("IDE read error", 1);
+        }
+
+        insw(IDE_DATA, buffer + (uint32_t)s * 256, 256);
     }
 
-    for (int i = 0; i < 256; i++)
-    {
-        // uint16_t word = inw(IDE_DATA);
-        // buffer[i] = (word << 8) | (word >> 8);
-        buffer[i] = inw(IDE_DATA);
-    }
-    
     enable_interrupts();
-    status = inb(IDE_STATUS);
 }
 
-void ide_write_sector_monotask(uint32_t lba, uint16_t* buffer)
+void ide_write_sectors_monotask(uint32_t lba, uint8_t count, uint16_t* buffer)
 {
+    uint8_t s;
+
     disable_interrupts();
-    
+
     ide_wait_nonbusy();
     ide_select_drive(lba);
-    
-    outb(IDE_SECT_COUNT, 1);
+
+    outb(IDE_SECT_COUNT, count);
     outb(IDE_LBA_LOW, lba & 0xFF);
     outb(IDE_LBA_MID, (lba >> 8) & 0xFF);
     outb(IDE_LBA_HIGH, (lba >> 16) & 0xFF);
     outb(IDE_CMD, IDE_CMD_WRITE);
-    
-    for (int i = 0; i < 256; i++)
-    {
-        outw(IDE_DATA, buffer[i]);
-    }
-    
-    enable_interrupts();
-    sema_wait(&ide_sem);
-    disable_interrupts();
 
-    if (inb(IDE_STATUS) & IDE_STATUS_ERR)
+    for (s = 0; s < count; s++)
     {
-        kpanic("IDE write error", 1);
+        /* The controller is ready for this sector's data as soon as the
+         * previous one completed (BSY clear / DRQ set); for s==0 that's
+         * immediately after the command above. */
+        ide_wait_nonbusy();
+        outsw(IDE_DATA, buffer + (uint32_t)s * 256, 256);
+
+        enable_interrupts();
+        sema_wait(&ide_sem);
+        disable_interrupts();
+
+        if (inb(IDE_STATUS) & IDE_STATUS_ERR)
+        {
+            kpanic("IDE write error", 1);
+        }
     }
-    
+
     enable_interrupts();
+}
+
+void ide_read_sector_monotask(uint32_t lba, uint16_t* buffer)
+{
+    ide_read_sectors_monotask(lba, 1, buffer);
+}
+
+void ide_write_sector_monotask(uint32_t lba, uint16_t* buffer)
+{
+    ide_write_sectors_monotask(lba, 1, buffer);
 }
 
 static void queue_push(ide_request_t *req)
@@ -194,9 +207,7 @@ static void ide_dispatch(ide_request_t *req)
     else
     {
         outb(IDE_CMD, IDE_CMD_WRITE);
-        uint16_t *src = (uint16_t *)req->buffer;
-        for (int i = 0; i < 256; i++)
-            outw(IDE_DATA, src[i]);
+        outsw(IDE_DATA, req->buffer, 256);
     }
 }
 
@@ -224,9 +235,7 @@ void ide_irq_handler(void)
 
     if (req->type == IDE_REQ_READ)
     {
-        uint16_t *dst = (uint16_t *)req->buffer;
-        for (int i = 0; i < 256; i++)
-            dst[i] = inw(IDE_DATA);
+        insw(IDE_DATA, req->buffer, 256);
     }
 
     task_t *owner = get_task_by_pid(req->owner_pid);
@@ -313,16 +322,29 @@ int ide_enqueue_write(uint32_t lba, const void *buffer)
 
 int ide_read_sectors(uint32_t lba, uint8_t count, void *buffer)
 {
-    if (lba > MAX_LBA || count == 0) return -1;
-    uint8_t *buf = (uint8_t *)buffer;
+    uint8_t i;
+    uint8_t* buf;
+    bool ide_init;
 
-    bool ide_init = (get_task_by_pid(1) != NULL);
-    for (uint8_t i = 0; i < count; i++)
+    if (lba > MAX_LBA || count == 0)
+        return -1;
+
+    buf = (uint8_t *)buffer;
+    ide_init = (get_task_by_pid(1) != NULL);
+
+    if (ide_init == false || m_get_scheduler_running() == 0)
     {
-/* TODO: think how to handle properly the monotask case, maybe move it to a separate function? */
-        if ((ide_init == false) || m_get_scheduler_running() == 0) /* monotask, maybe rethink it? */
-            ide_read_sector_monotask(lba + i, (uint16_t*)(buf + (i * IDE_SECTOR_SIZE)));
-        else if (ide_enqueue_read(lba + i, buf + (i * IDE_SECTOR_SIZE)) < 0)
+        /* Monotask: one command covers the whole run instead of
+         * re-selecting the drive and re-issuing a command per sector. */
+        ide_read_sectors_monotask(lba, count, (uint16_t*)buf);
+        return 0;
+    }
+
+    /* Multitask: hand sectors to the IDE task's queue one request at a
+     * time (its IRQ-driven protocol is inherently per-sector). */
+    for (i = 0; i < count; i++)
+    {
+        if (ide_enqueue_read(lba + i, buf + (i * IDE_SECTOR_SIZE)) < 0)
             return -1;
     }
     return 0;
@@ -330,15 +352,24 @@ int ide_read_sectors(uint32_t lba, uint8_t count, void *buffer)
 
 int ide_write_sectors(uint32_t lba, uint8_t count, void *buffer)
 {
-    if (lba > MAX_LBA || count == 0) return -1;
-    uint8_t *buf = (uint8_t *)buffer;
-    bool ide_init = (get_task_by_pid(1) != NULL);
-    for (uint8_t i = 0; i < count; i++)
+    uint8_t i;
+    uint8_t* buf;
+    bool ide_init;
+
+    if (lba > MAX_LBA || count == 0)
+        return -1;
+    buf = (uint8_t *)buffer;
+    ide_init = (get_task_by_pid(1) != NULL);
+
+    if (ide_init == false || m_get_scheduler_running() == 0)
     {
-/* TODO: think how to handle properly the monotask case, maybe move it to a separate function? */
-        if (ide_init == false || m_get_scheduler_running() == 0) /* monotask, maybe rethink it? */
-            ide_write_sector_monotask(lba + i, (uint16_t*)(buf + (i * IDE_SECTOR_SIZE)));
-        else if (ide_enqueue_write(lba + i, buf + (i * IDE_SECTOR_SIZE)) < 0)
+        ide_write_sectors_monotask(lba, count, (uint16_t*)buf);
+        return 0;
+    }
+
+    for (i = 0; i < count; i++)
+    {
+        if (ide_enqueue_write(lba + i, buf + (i * IDE_SECTOR_SIZE)) < 0)
             return -1;
     }
     return 0;
