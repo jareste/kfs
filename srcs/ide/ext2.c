@@ -955,6 +955,22 @@ int sys_chmod(const char *path, int mode)
     return 0;
 }
 
+int sys_chdir(const char *path)
+{
+    uint32_t inode_num;
+    struct ext2_inode inode;
+
+    if (ext2_resolve_path(path, &inode_num) < 0)
+        return -2; // -ENOENT
+
+    ext2_read_inode(inode_num, &inode);
+    if (!(inode.i_mode & DIR_MODE))
+        return -20; // -ENOTDIR
+
+    set_current_dir(inode_num);
+    return 0;
+}
+
 int sys_close(int fd, task_t *task)
 {
     // task_t* current;

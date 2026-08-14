@@ -78,6 +78,7 @@ int ext2_fclose(ext2_FILE *stream);
 
 int sys_open(const char *path, int flags);
 int sys_chmod(const char *path, int mode);
+int sys_chdir(const char *path);
 int sys_close(int fd, task_t* current);
 ssize_t sys_read(int fd, void *buf, size_t count);
 ssize_t sys_lseek(int fd, ssize_t offset, int whence);

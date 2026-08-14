@@ -479,9 +479,8 @@ static void task_exit_task(task_t *task, int signal)
             task_list = task->next;
     }
 
-    pid_t pid = task->pid;
     task->state = TASK_ZOMBIE;
-    enqueue(&finished_pid_queue, pid, signal);
+    task->exit_status = signal;
     if (to_free)
     {
         /* If there's already a task waiting to be freed, free it now */
