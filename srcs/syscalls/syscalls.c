@@ -361,12 +361,12 @@ struct termios {
 int sys_ioctl(int fd, uint32_t request, void *arg)
 {
     task_t *task = get_current_task();
-    
-    return -1;
+
     if (fd < 0 || fd >= MAX_FDS || !task->fd_table[fd])
         return -1;
 
-    switch (request) {
+    switch (request)
+    {
         case TIOCGWINSZ: {
             if (!arg) return -1;
             struct winsize *ws = (struct winsize*)arg;
@@ -379,19 +379,17 @@ int sys_ioctl(int fd, uint32_t request, void *arg)
         case TIOCSWINSZ:
             return 0;
 
-        case TCGETS: {
+        case TCGETS:
             if (!arg) return -1;
-            // Retorna una termios mínima que indica modo canónico + echo
             struct termios *t = (struct termios*)arg;
             memset(t, 0, sizeof(*t));
             t->c_iflag = 0x6d02;  // BRKINT|ICRNL|IXON|IXANY
             t->c_oflag = 0x0005;  // OPOST|ONLCR
             t->c_cflag = 0x04bf;  // CS8|CREAD|HUPCL|B38400
-            t->c_lflag = 0x8a3b;  // ISIG|ICANON|ECHO|ECHOE|ECHOK|IEXTEN
+            t->c_lflag = 0x8a3b & ~0x8u;  // ISIG|ICANON|ECHOE|ECHOK|IEXTEN, no ECHO (0x8)
             t->c_cc[4] = 1;       // VMIN
             t->c_cc[5] = 0;       // VTIME
             return 0;
-        }
         case TCSETS:
         case TCSETSW:
         case TCSETSF:
@@ -399,6 +397,51 @@ int sys_ioctl(int fd, uint32_t request, void *arg)
 
         default:
             return -1;
+    }
+}
+
+int sys_fcntl(int fd, int cmd, uint32_t arg)
+{
+    task_t *task = get_current_task();
+
+#define F_DUPFD         0
+#define F_GETFD         1
+#define F_SETFD         2
+#define F_GETFL         3
+#define F_SETFL         4
+#define F_DUPFD_CLOEXEC 1030
+
+    if (fd < 0 || fd >= MAX_FDS || !task->fd_table[fd])
+        return -9; // -EBADF
+
+    switch (cmd)
+    {
+        case F_DUPFD:
+        case F_DUPFD_CLOEXEC:
+        {
+            int newfd;
+            uint32_t min_fd = arg;
+            for (newfd = (int)min_fd; newfd < MAX_FDS; newfd++)
+            {
+                if (!task->fd_table[newfd])
+                    break;
+            }
+            if (newfd >= MAX_FDS)
+                return -24; // -EMFILE
+
+            task->fd_table[newfd] = true;
+            task->fd_pointers[newfd] = task->fd_pointers[fd];
+            task->fd_pointers[newfd].ref_count++;
+            return newfd;
+        }
+        case F_GETFD:
+        case F_GETFL:
+            return 0;
+        case F_SETFD:
+        case F_SETFL:
+            return 0;
+        default:
+            return -38; // -ENOSYS
     }
 }
 
@@ -582,6 +625,8 @@ void init_syscalls()
     syscall_table[SYS_RT_SIGACTION] = (syscall_entry_t){ .num_args=4, .handler.handler=(void*)sys_rt_sigaction };
     syscall_table[SYS_READLINKAT] = (syscall_entry_t){ .num_args=4, .handler.handler=(void*)sys_readlinkat };
     syscall_table[SYS_IOCTL]  = (syscall_entry_t){ .num_args=3, .handler.handler=(void*)sys_ioctl };
+    syscall_table[SYS_FCNTL]  = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args=3, .handler.handler=(void*)sys_fcntl };
+    syscall_table[SYS_FCNTL64] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args=3, .handler.handler=(void*)sys_fcntl };
     syscall_table[SYS_STATX] = (syscall_entry_t){ .num_args=5, .handler.handler=(void*)sys_statx };
     syscall_table[SYS_UNAME] = (syscall_entry_t){ .num_args=1, .handler.handler=(void*)sys_uname };
     syscall_table[SYS_GETCWD] = (syscall_entry_t){ .num_args=2, .handler.handler=(void*)sys_getcwd };
