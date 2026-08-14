@@ -98,7 +98,7 @@ pid_t _getpid(void);
 int m_get_scheduler_running(void);
 void schedule_task_sleep(task_t* task, uint64_t seconds);
 
-void create_user_task_at(uint32_t entry_addr, const char *name, void (*on_exit)(void), page_directory_t* _task_dir, uint32_t heap_start, char* const argv[], char* const envp[]);
+pid_t create_user_task_at(uint32_t entry_addr, const char *name, void (*on_exit)(void), page_directory_t* _task_dir, uint32_t heap_start, char* const argv[], char* const envp[]);
 
 void _exit(int status);
 

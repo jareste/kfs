@@ -1131,7 +1131,7 @@ void build_user_stack(uint32_t *usp_out, const char *name,
     *usp_out = (uint32_t)usp;
 }
 
-void create_user_task_at(uint32_t entry_addr, const char *name, void (*on_exit)(void), page_directory_t* _task_dir, uint32_t heap_start, char* const argv[], char* const envp[])
+pid_t create_user_task_at(uint32_t entry_addr, const char *name, void (*on_exit)(void), page_directory_t* _task_dir, uint32_t heap_start, char* const argv[], char* const envp[])
 {
     task_t *task = kmalloc(sizeof(task_t));
     memset(task, 0, sizeof(task_t));
@@ -1182,7 +1182,10 @@ vmm_switch_directory(prev_dir);
     task->state = TASK_READY;
     task->is_user = true;
     task->on_exit = on_exit;
-    
+    task->parent = get_current_task();
+    if (task->parent)
+        add_child(task->parent, task);
+
     task->brk_start   = heap_start;
     task->brk_current = heap_start;
 
@@ -1196,6 +1199,8 @@ vmm_switch_directory(prev_dir);
     init_standard_fds(task);
     init_signals(task);
     add_new_task(task);
+
+    return task->pid;
 }
 
 

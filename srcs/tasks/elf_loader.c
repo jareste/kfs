@@ -150,6 +150,7 @@ int exec_bin(const char* path, char* const argv[], char* const envp[])
     page_directory_t* task_dir;
     page_directory_t* prev_dir;
     uint32_t entry;
+    pid_t new_pid;
     ssize_t file_size;
     uint8_t *binary;
     int fd;
@@ -218,7 +219,7 @@ int exec_bin(const char* path, char* const argv[], char* const envp[])
         return -1;
     }
 
-    create_user_task_at(entry, path, NULL, task_dir, heap_start, kargv, kenvp);
+    new_pid = create_user_task_at(entry, path, NULL, task_dir, heap_start, kargv, kenvp);
 
 
     for (int i = 0; i < argc; i++) kfree(kargv[i]);
@@ -230,5 +231,5 @@ int exec_bin(const char* path, char* const argv[], char* const envp[])
 
     kfree(binary);
 
-    return 0;
+    return new_pid;
 }

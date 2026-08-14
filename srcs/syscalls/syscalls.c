@@ -182,6 +182,7 @@ int sys_execve(const char* path, char* const argv[], char* const envp[])
 {
     int ret;
     char* _path;
+    int status;
 
     if (strcmp(path, "/proc/self/exe") == 0)
         _path = kstrdup(get_current_task()->name);
@@ -196,7 +197,10 @@ int sys_execve(const char* path, char* const argv[], char* const envp[])
         return -1;
     }
     kfree(_path);
-    _exit(0); /* should never return */
+
+    status = 0;
+    _waitpid(ret, &status, 0);
+    _exit(status); /* should never return */
     return 0;
 }
 
@@ -322,7 +326,7 @@ struct utsname {
 int sys_uname(struct utsname *buf)
 {
     strncpy(buf->sysname, "kfs", sizeof(buf->sysname));
-    strncpy(buf->nodename, "kfs-node", sizeof(buf->nodename));
+    strncpy(buf->nodename, "jareste-kfs", sizeof(buf->nodename));
     strncpy(buf->release, "0.9", sizeof(buf->release));
     strncpy(buf->version, "0.1", sizeof(buf->version));
     strncpy(buf->machine, "i386", sizeof(buf->machine));
