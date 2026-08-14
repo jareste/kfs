@@ -14,6 +14,7 @@
 
 /* --- Derived constants --- */
 #define SECTORS_PER_BLOCK (EXT2_BLOCK_SIZE / IDE_SECTOR_SIZE)
+#define EXT2_SUPER_MAGIC 0xEF53
 
 /* --- Global FS structure --- */
 struct ext2_fs
@@ -23,6 +24,13 @@ struct ext2_fs
     uint8_t* inode_bitmap;  /* one block */
     uint8_t* block_bitmap;  /* one block */
 } ext2;
+
+typedef struct
+{
+    char  *data;
+    size_t len;
+    size_t pos;
+} proc_buf_t;
 
 static uint32_t current_dir = EXT2_ROOT_INODE;  /* current working directory inode */
 
@@ -745,7 +753,6 @@ static uint32_t ext2_get_or_alloc_block(struct ext2_inode *inode, uint32_t block
     {
         indirect_index = block_index - 12;
         indirect_buf = kmalloc(EXT2_BLOCK_SIZE);
-        block_num;
 
         if (inode->i_block[12] == 0)
         {
@@ -783,8 +790,6 @@ static uint32_t ext2_get_or_alloc_block(struct ext2_inode *inode, uint32_t block
         l1_index = double_index / 256;
         l2_index = double_index % 256;
         l1_buf = kmalloc(EXT2_BLOCK_SIZE);
-        l2_buf;
-        block_num;
 
         if (inode->i_block[13] == 0)
         {
@@ -954,6 +959,127 @@ int delete_device_node(const char *dir, const char *name)
     return 0;
 }
 
+static ssize_t proc_file_read(void *fp, void *buf, size_t count)
+{
+    proc_buf_t *pb = (proc_buf_t*)fp;
+    size_t remain = pb->len - pb->pos;
+    size_t n = (count < remain) ? count : remain;
+    if (n > 0)
+        memcpy(buf, pb->data + pb->pos, n);
+    pb->pos += n;
+    return n;
+}
+
+static int proc_file_close(void *fp)
+{
+    proc_buf_t *pb = (proc_buf_t*)fp;
+    if (pb)
+    {
+        kfree(pb->data);
+        kfree(pb);
+    }
+    return 0;
+}
+
+static char proc_state_char(task_state_t state)
+{
+    switch (state)
+    {
+        case TASK_RUNNING:
+        case TASK_READY:    return 'R';
+        case TASK_ZOMBIE:   return 'Z';
+        case TASK_WAITING:
+        case TASK_SLEEPING: return 'S';
+        default:            return 'S';
+    }
+}
+
+static task_t *proc_lookup(const char *path, const char **rest)
+{
+    const char *p;
+    uint32_t pid = 0;
+
+    if (strncmp(path, "/proc/", 6) != 0)
+        return NULL;
+    p = path + 6;
+    if (*p < '0' || *p > '9')
+        return NULL;
+    while (*p >= '0' && *p <= '9')
+    {
+        pid = pid * 10 + (uint32_t)(*p - '0');
+        p++;
+    }
+    if (*p == '/')
+        p++;
+    if (rest)
+        *rest = p;
+
+    return get_task_by_pid((pid_t)pid);
+}
+
+static void proc_append_uint(char *buf, uint32_t val)
+{
+    char tmp[12];
+    uitoa(val, tmp, 10);
+    strcat(buf, tmp);
+    strcat(buf, " ");
+}
+
+static proc_buf_t *proc_build_stat(task_t *t)
+{
+    proc_buf_t *pb = kmalloc(sizeof(proc_buf_t));
+    char *buf = kmalloc(256);
+    char tmp[4];
+    uint32_t ppid = t->parent ? t->parent->pid : 0;
+
+    buf[0] = '\0';
+    uitoa(t->pid, tmp, 10); /* reused below just for the pid itself */
+    strcat(buf, tmp);
+    strcat(buf, " (");
+    strcat(buf, t->name);
+    strcat(buf, ") ");
+    tmp[0] = proc_state_char(t->state);
+    tmp[1] = '\0';
+    strcat(buf, tmp);
+    strcat(buf, " ");
+    proc_append_uint(buf, ppid); /* ppid */
+    proc_append_uint(buf, t->pid); /* pgid */
+    proc_append_uint(buf, t->pid); /* sid */
+    strcat(buf, "-1 0 "); /* tty, tpgid */
+    strcat(buf, "0 0 0 0 0 "); /* flags, min_flt, cmin_flt, maj_flt, cmaj_flt */
+    strcat(buf, "0 0 "); /* utime, stime */
+    strcat(buf, "0 0 0 "); /* cutime, cstime, priority */
+    strcat(buf, "0 "); /* nice */
+    strcat(buf, "0 0 "); /* timeout, it_real_value */
+    strcat(buf, "0 "); /* start_time */
+    strcat(buf, "0 "); /* vsize */
+    strcat(buf, "0"); /* rss */
+
+    pb->data = buf;
+    pb->len = strlen(buf);
+    pb->pos = 0;
+    return pb;
+}
+
+static bool proc_open_file(task_t *current, int fd, const char *subpath, task_t *target)
+{
+    proc_buf_t *pb;
+
+    if (strcmp(subpath, "stat") != 0)
+        return false;
+
+    pb = proc_build_stat(target);
+
+    memset(&current->fd_pointers[fd], 0, sizeof(file_t));
+    current->fd_pointers[fd].type = FD_FILE;
+    current->fd_pointers[fd].fp = pb;
+    current->fd_pointers[fd].fops.read = proc_file_read;
+    current->fd_pointers[fd].fops.close = proc_file_close;
+    current->fd_pointers[fd].ref_count = 1;
+    current->fd_table[fd] = true;
+    return true;
+}
+
 /* --- Fileio fds Implementations --- */
 int sys_open(const char *path, int flags)
 {
@@ -972,6 +1098,33 @@ int sys_open(const char *path, int flags)
     {
         kprintf("sys_open: too many open files\n");
         return -1;
+    }
+
+    if (strcmp(path, "/proc/mounts") == 0 || strcmp(path, "/proc/self/mounts") == 0)
+        path = "/etc/mtab";
+
+    if (strcmp(path, "/proc") == 0 || strcmp(path, "/proc/") == 0)
+    {
+        memset(&current->fd_pointers[fd], 0, sizeof(file_t));
+        current->fd_pointers[fd].type = FD_PROC_DIR;
+        current->fd_pointers[fd].offset = 0; /* index into the live pid range */
+        current->fd_pointers[fd].flags = flags;
+        current->fd_pointers[fd].ref_count = 1;
+        current->fd_table[fd] = true;
+        return fd;
+    }
+
+    if (strncmp(path, "/proc/", 6) == 0)
+    {
+        const char *subpath;
+        task_t *target = proc_lookup(path, &subpath);
+        if (!target)
+            return -2; // -ENOENT
+        if (*subpath == '\0')
+            return -21; // -EISDIR: "/proc/<pid>" itself isn't a readable file
+        if (proc_open_file(current, fd, subpath, target))
+            return fd;
+        return -2; // -ENOENT: no such synthesized file under this pid
     }
 
     {
@@ -1107,6 +1260,31 @@ int sys_chdir(const char *path)
     return 0;
 }
 
+int sys_statfs64(const char *path, uint32_t bufsize, struct kfs_statfs64 *buf)
+{
+    uint32_t inode_num;
+    (void)bufsize;
+
+    if (!path || !buf)
+        return -14; // -EFAULT
+    if (ext2_resolve_path(path, &inode_num) < 0)
+        return -2; // -ENOENT
+
+    memset(buf, 0, sizeof(*buf));
+    buf->f_type    = EXT2_SUPER_MAGIC;
+    buf->f_bsize   = EXT2_BLOCK_SIZE;
+    buf->f_blocks  = ext2.sb.s_blocks_count;
+    buf->f_bfree   = ext2.sb.s_free_blocks_count;
+    buf->f_bavail  = (ext2.sb.s_free_blocks_count > ext2.sb.s_r_blocks_count)
+                        ? (ext2.sb.s_free_blocks_count - ext2.sb.s_r_blocks_count)
+                        : 0;
+    buf->f_files   = ext2.sb.s_inodes_count;
+    buf->f_ffree   = ext2.sb.s_free_inodes_count;
+    buf->f_namelen = 255;
+    buf->f_frsize  = EXT2_BLOCK_SIZE;
+    return 0;
+}
+
 int sys_close(int fd, task_t *task)
 {
     // task_t* current;
@@ -1233,15 +1411,62 @@ ssize_t sys_getdents64(int fd, void *dirp, size_t count)
     file_t *file_obj;
     uint8_t *blkbuf;
     uint8_t *out;
+    uint8_t *out2;
     size_t written;
+    size_t written2;
     uint32_t offset;
     uint32_t inode_num;
+    pid_t p;
+    pid_t max_pid;
     struct ext2_inode dir;
+    task_t *t;
+    char namebuf[12];
+    size_t namelen;
+    size_t reclen;
+    struct linux_dirent64 *out_de;
+
+
 
     if (fd < 0 || fd >= MAX_FDS || current->fd_table[fd] == false)
         return -1;
 
     file_obj = &current->fd_pointers[fd];
+
+    if (file_obj->type == FD_PROC_DIR)
+    {
+        out2 = (uint8_t*)dirp;
+        written2 = 0;
+        p = (pid_t)file_obj->offset;
+        max_pid = get_max_pid();
+
+        for (; p <= max_pid; p++)
+        {
+            t = get_task_by_pid(p);
+            if (!t)
+                continue;
+
+            uitoa((uint32_t)p, namebuf, 10);
+            namelen = strlen(namebuf);
+            reclen = ((size_t)&((struct linux_dirent64*)0)->d_name + namelen + 1 + 7) & ~7u;
+
+            if (written2 + reclen > count)
+                break; /* buffer full; resume at this pid next call */
+
+            out_de = (struct linux_dirent64 *)(out2 + written2);
+            out_de->d_ino = (uint64_t)p;
+            out_de->d_reclen = reclen;
+            out_de->d_type = DT_DIR;
+            memcpy(out_de->d_name, namebuf, namelen);
+            out_de->d_name[namelen] = '\0';
+            out_de->d_off = p + 1;
+
+            written2 += reclen;
+        }
+
+        file_obj->offset = (uint32_t)p;
+        return written2;
+    }
+
     if (file_obj->type != FD_DIR)
         return -20; // -ENOTDIR
 
@@ -2011,6 +2236,8 @@ void create_unix_dirs()
     ext2_write_file_if_missing("/etc/group",
         "root:x:0:\n"
         "user:x:1000:\n");
+    ext2_write_file_if_missing("/etc/mtab",
+        "/dev/root / ext2 rw 0 0\n");
 }
 
 void test_fileio()
@@ -2102,6 +2329,26 @@ int sys_statx(int dirfd, const char *path, int flags,
     const char *resolved = path;
     if (path[0] == '\0') {
         return -1;
+    }
+
+    if (strncmp(path, "/proc/", 6) == 0)
+    {
+        const char *subpath;
+        task_t *target = proc_lookup(path, &subpath);
+        struct statx *sxp;
+
+        if (!target)
+            return -2; // -ENOENT
+
+        sxp = (struct statx*)statxbuf;
+        memset(sxp, 0, sizeof(*sxp));
+        sxp->stx_mask = mask;
+        sxp->stx_mode = DIR_MODE | 0555;
+        sxp->stx_nlink = 1;
+        sxp->stx_uid = target->uid;
+        sxp->stx_gid = target->gid;
+        sxp->stx_ino = (uint64_t)target->pid;
+        return 0;
     }
 
     uint32_t inode_num;

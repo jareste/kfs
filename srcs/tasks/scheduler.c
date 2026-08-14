@@ -193,6 +193,11 @@ task_t* get_current_task()
     return current_task;
 }
 
+pid_t get_max_pid(void)
+{
+    return task_index;
+}
+
 pid_t _getpid()
 {
     if (!current_task)

@@ -100,6 +100,7 @@ typedef enum {
     SYS_MMAP = 90,
     SYS_MUNMAP = 91,
     SYS_WAIT4 = 114,
+    SYS_SYSINFO = 116,
     // ...
     SYS_UNAME = 122,
     SYS_MPROTECT = 125,
@@ -108,6 +109,7 @@ typedef enum {
     SYS_GET_KERNEL_SYMS = 130,
     SYS_QUERY_MODULE = 131,
     SYS_QUOTACTL = 132,
+    SYS__LLSEEK = 140,
     SYS_WRITEV = 146,
     SYS_GETTIMEOFDAY = 169,
     SYS_NANOSLEEP = 170,
@@ -130,6 +132,7 @@ typedef enum {
     SYS_SET_THREAD_AREA = 243,
     SYS_EXIT_GROUP = 252,
     SYS_SET_TID_ADDRESS = 258,
+    SYS_STATFS64 = 268,
     SYS_READLINKAT = 305,
     SYS_SET_ROBUST_LIST = 311,
     SYS_GETRANDOM = 355,

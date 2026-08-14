@@ -460,14 +460,18 @@ struct timespec64 {
     int32_t  tv_nsec;
 };
 
+#define CLOCK_REALTIME  0
+#define CLOCK_MONOTONIC 1
+
 int sys_clock_gettime64(int clockid, struct timespec64 *tp)
 {
-    (void)clockid;
     if (!tp)
         return -1;
-    
-    // Retorna tiempo simple basado en ticks del kernel
-    tp->tv_sec  = get_kuptime(); // segundos desde arranque
+
+    if (clockid == CLOCK_REALTIME)
+        tp->tv_sec = _time(NULL); /* real wall-clock time, from the RTC */
+    else
+        tp->tv_sec = get_kuptime(); /* monotonic: seconds since boot */
     tp->tv_nsec = 0;
     return 0;
 }
@@ -479,10 +483,57 @@ struct timespec32 {
 
 int sys_clock_gettime(int clockid, struct timespec32 *tp)
 {
-    (void)clockid;
     if (!tp) return -1;
-    tp->tv_sec  = get_kuptime();
+
+    if (clockid == CLOCK_REALTIME)
+        tp->tv_sec = _time(NULL);
+    else
+        tp->tv_sec = get_kuptime();
     tp->tv_nsec = 0;
+    return 0;
+}
+
+struct sysinfo32 {
+    long uptime;
+    unsigned long loads[3];
+    unsigned long totalram;
+    unsigned long freeram;
+    unsigned long sharedram;
+    unsigned long bufferram;
+    unsigned long totalswap;
+    unsigned long freeswap;
+    unsigned short procs, pad;
+    unsigned long totalhigh;
+    unsigned long freehigh;
+    unsigned int mem_unit;
+    char __reserved[256];
+};
+
+/* It's not 100% correct, as i'm only setting uptime and mem_unit. for proper handling I should be checking also everything else. */
+int sys_sysinfo(struct sysinfo32 *info)
+{
+    if (!info)
+        return -14; // -EFAULT
+
+    memset(info, 0, sizeof(*info));
+    info->uptime = (long)get_kuptime();
+    info->mem_unit = 1;
+    return 0;
+}
+
+int sys_llseek(unsigned int fd, uint32_t offset_high, uint32_t offset_low, ssize_t *result, int whence)
+{
+    ssize_t new_pos;
+    (void)offset_high;
+
+    if (!result)
+        return -14; // -EFAULT
+
+    new_pos = sys_lseek((int)fd, (ssize_t)offset_low, whence);
+    if (new_pos < 0)
+        return -1;
+
+    *result = new_pos;
     return 0;
 }
 
@@ -606,6 +657,9 @@ void init_syscalls()
     syscall_table[SYS_OPEN] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)_sys_open };
     syscall_table[SYS_CHMOD] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_chmod };
     syscall_table[SYS_CHDIR] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_chdir };
+    syscall_table[SYS_STATFS64] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 3, .handler.handler = (void*)sys_statfs64 };
+    syscall_table[SYS_SYSINFO] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_sysinfo };
+    syscall_table[SYS__LLSEEK] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 5, .handler.handler = (void*)sys_llseek };
     syscall_table[SYS_CLOSE] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)_sys_close, };
     syscall_table[SYS_GETPID] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 0, .handler.handler = (void*)sys_get_pid };
     syscall_table[SYS_SIGNAL] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_signal };

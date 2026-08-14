@@ -92,6 +92,7 @@ void start_foo_tasks(void);
 void scheduler_init(void);
 task_t* get_task_by_pid(pid_t pid);
 task_t* get_current_task();
+pid_t get_max_pid(void);
 void kill_task();
 pid_t _waitpid(pid_t pid, int *status, int options);
 pid_t _getpid(void);
