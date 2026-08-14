@@ -181,7 +181,13 @@ time_t sys_time(time_t* tloc)
 int sys_execve(const char* path, char* const argv[], char* const envp[])
 {
     int ret;
-    char* _path = kstrdup(path);
+    char* _path;
+
+    if (strcmp(path, "/proc/self/exe") == 0)
+        _path = kstrdup(get_current_task()->name);
+    else
+        _path = kstrdup(path);
+
     ret = exec_bin(_path, argv, envp);
     if (ret < 0)
     {

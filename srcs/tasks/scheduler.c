@@ -1082,18 +1082,23 @@ void build_user_stack(uint32_t *usp_out, const char *name,
 
     // Luego argv strings
     char *argv_strs[64];
-    // argv[0] siempre es el nombre del binario
+    if (argc == 0)
     {
+        /* No argv so just send the same bin name */
         size_t len = strlen(name) + 1;
         str_ptr -= len;
         memcpy(str_ptr, name, len);
         argv_strs[0] = str_ptr;
     }
-    for (int i = 1; i < argc; i++) {
-        size_t len = strlen(argv[i]) + 1;
-        str_ptr -= len;
-        memcpy(str_ptr, argv[i], len);
-        argv_strs[i] = str_ptr;
+    else
+    {
+        for (int i = argc - 1; i >= 0; i--)
+        {
+            size_t len = strlen(argv[i]) + 1;
+            str_ptr -= len;
+            memcpy(str_ptr, argv[i], len);
+            argv_strs[i] = str_ptr;
+        }
     }
 
     // Alinea a 16 bytes
