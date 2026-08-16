@@ -12,6 +12,10 @@ char* get_line()
     {
         if (c == '\0')
         {
+            if (kb_eof_pending() && strlen(get_kb_buffer()) == 0)
+            {
+                return get_kb_buffer();
+            }
             continue;
         }
         if (get_current_task()->screen_echo == true && c != '\0' && c != '\b')

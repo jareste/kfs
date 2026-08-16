@@ -138,6 +138,10 @@ typedef enum {
     SYS_GETRANDOM = 355,
     SYS_STATX = 383,
     SYS_RSEQ = 386,
+
+    
+    /* Just for internal use */
+    SYS_KFS_SIGRETURN = 400,
     SYS_MAX_SYSCALL = 404
 } syscalls_num;
 

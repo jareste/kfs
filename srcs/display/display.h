@@ -47,6 +47,7 @@ int kprintf(const char *format, ...);
 void clear_screen();
 void delete_last_char();
 void delete_until_char();
+void mark_input_line_start(void);
 void move_cursor_left();
 void move_cursor_right();
 void move_cursor_up();

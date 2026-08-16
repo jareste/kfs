@@ -76,6 +76,19 @@ static uint8_t exit_stub[] =
     0xEB, 0xFE,                      // jmp $ (por si acaso)
 };
 
+/* Return address for a real (userspace) signal handler's call frame (see
+ * maybe_deliver_signal()): once the handler does a normal `ret`, execution
+ * lands here instead of wherever it would have gone in the interrupted
+ * code, and this asks the kernel to restore that interrupted context
+ * in-place via sys_sigreturn(). Shares USER_STUB_ADDR's page with
+ * exit_stub, at a fixed offset into it. */
+static uint8_t sigreturn_stub[] =
+{
+    0xB8, 0x90, 0x01, 0x00, 0x00,  // mov eax, 400  (SYS_KFS_SIGRETURN)
+    0xCD, 0x30,                      // int 0x30
+    0xEB, 0xFE,                      // jmp $ (should never get here)
+};
+
 static uint32_t *saved_kernel_esp __attribute__((unused)) = NULL;
 static uint32_t m_let_scheduler_run = 0;
 task_t* current_task = NULL;
@@ -83,6 +96,18 @@ static task_t* task_list = NULL;
 static task_t* to_free = NULL;
 static pid_t task_index = 0;
 static Queue finished_pid_queue;
+
+static pid_t m_foreground_pid = -1;
+
+pid_t get_foreground_pid(void)
+{
+    return m_foreground_pid;
+}
+
+void set_foreground_pid(pid_t pid)
+{
+    m_foreground_pid = pid;
+}
 
 void dtach_from_childs(task_t *task)
 {
@@ -145,8 +170,18 @@ void close_all_fds(task_t* task)
 
 void free_finished_tasks()
 {
-    if (!to_free)
+    /* Not just re-entrancy against itself: task_exit_task() can call this
+     * directly (its "there's already one queued" path), outside of
+     * timer_schedule()'s own inside_timer_schedule guard. If a timer IRQ
+     * lands anywhere in the body below before to_free is cleared at the
+     * end, timer_schedule()'s own call sees the same still-set to_free
+     * and processes it a second time -- kfree()ing the same kernel stack
+     * (and everything else here) twice. */
+    static bool busy = false;
+    if (!to_free || busy)
         return;
+    busy = true;
+
     dtach_from_childs(to_free);
     remove_from_father(to_free);
     close_all_fds(to_free);
@@ -186,6 +221,7 @@ void free_finished_tasks()
     }
     kfree(to_free);
     to_free = NULL;
+    busy = false;
 }
 
 task_t* get_current_task()
@@ -265,14 +301,17 @@ pid_t _waitpid(pid_t pid, int *status, int options)
     task_t *child = get_task_by_pid(pid);
     if (!child || child->parent != current_task)
         return -1;
-    
+
+    if (current_task->pid == (uint32_t)m_foreground_pid)
+        m_foreground_pid = pid;
+
     current_task->state = TASK_WAITING;
     while (child->state != TASK_ZOMBIE)
         ;
-    
+
     if (status)
         *status = child->exit_status;
-    
+
     return pid;
 }
 
@@ -400,6 +439,8 @@ uint32_t timer_schedule(uint32_t *iframe_esp)
     irq_handler_timer();
     free_finished_tasks();
 
+    handle_signals(iframe_esp);
+
     task_t *next = get_next_task();
     if (next == current_task)
     {
@@ -486,6 +527,10 @@ static void task_exit_task(task_t *task, int signal)
 
     task->state = TASK_ZOMBIE;
     task->exit_status = signal;
+
+    if (task->pid == (uint32_t)m_foreground_pid)
+        m_foreground_pid = task->parent ? (pid_t)task->parent->pid : m_foreground_pid;
+
     if (to_free)
     {
         /* If there's already a task waiting to be freed, free it now */
@@ -513,17 +558,24 @@ static void task_exit()
 void _exit(int status)
 {
     task_t *task = current_task;
-    
-    if (task->parent && task->parent->state == TASK_WAITING)
-        task->parent->state = TASK_READY;
-    
+    task_t *parent = task->parent;
+
     task_exit_task(task, status);
+
+    if (parent && parent->state == TASK_WAITING)
+        parent->state = TASK_READY;
 }
 
 void kill_task(int signal)
 {
     // kprintf("Killing task %d With signal:%d--------------\n", current_task->pid, signal);
-    task_exit_task(current_task, signal);
+    task_t *task = current_task;
+    task_t *parent = task->parent;
+
+    task_exit_task(task, signal);
+
+    if (parent && parent->state == TASK_WAITING)
+        parent->state = TASK_READY;
 }
 
 void add_child(task_t* parent, task_t* child)
@@ -577,8 +629,7 @@ void init_standard_fds(task_t *task)
     open_tty_device(tty_device, &task->fd_pointers[1]);
 
     task->fd_table[2] = true;
-    memcpy(&task->fd_pointers[2], &task->fd_pointers[1], sizeof(file_t));
-    task->fd_pointers[2].ref_count++;
+    open_tty_device(tty_device, &task->fd_pointers[2]);
 }
 
 void create_task(void (*entry)(void), char* name, void (*on_exit)(void))
@@ -775,6 +826,7 @@ pid_t _do_fork(iret_regs_t* parent_frame)
     child->state = TASK_READY;
     child->parent = parent;
     child->children = NULL;
+    child->sig_frame_valid = false;
 
     if (parent->is_user && parent->page_dir)
         child->page_dir = vmm_clone_directory(parent->page_dir);
@@ -813,6 +865,9 @@ pid_t _do_fork(iret_regs_t* parent_frame)
     add_child(parent, child);
     init_signals(child);
     add_new_task(child);
+
+    if (parent->pid == (uint32_t)m_foreground_pid)
+        m_foreground_pid = child->pid;
 
     kprintf("Forked new task '%s' with PID %d from parent PID %d\n", child->name, child->pid, parent->pid);
 
@@ -1054,7 +1109,8 @@ void task_read()
 #define USER_STACK_TOP   0xC0000000u
 #define USER_STACK_SIZE  (1 * 1024 * 1024)  // 1MB
 #define USER_STACK_BASE  (USER_STACK_TOP - USER_STACK_SIZE)
-#define USER_STUB_ADDR   0xBF000000u
+#define USER_STUB_ADDR   KFS_USER_STUB_ADDR
+#define SIGRETURN_STUB_ADDR KFS_SIGRETURN_STUB_ADDR
 
 void build_user_stack(uint32_t *usp_out, const char *name, 
                       char * const argv[], char * const envp[],
@@ -1159,13 +1215,14 @@ pid_t create_user_task_at(uint32_t entry_addr, const char *name, void (*on_exit)
     vmm_switch_directory(task_dir);
 
     memcpy((void*)USER_STUB_ADDR, exit_stub, sizeof(exit_stub));
+    memcpy((void*)SIGRETURN_STUB_ADDR, sigreturn_stub, sizeof(sigreturn_stub));
 
-uint32_t usp;
+    uint32_t usp;
 
     build_user_stack(&usp, name, argv, envp, task_dir);
 
 
-vmm_switch_directory(prev_dir);
+    vmm_switch_directory(prev_dir);
 
     uint32_t *ksp = kernel_stack_top;
     *--ksp = 0x2B; /* SS (user) */
@@ -1256,11 +1313,11 @@ void start_foo_tasks(void)
         NULL
     };
     static char *default_envp[] = {
-    "PATH=/bin:/usr/bin",
-    "HOME=/",
-    // "TERM=linux",
-    NULL
-};
+        "PATH=/bin:/usr/bin",
+        "HOME=/",
+        // "TERM=linux",
+        NULL
+    };
 
     // static char* busybox_echo_argv[] = {
     //     "busybox",
@@ -1268,7 +1325,7 @@ void start_foo_tasks(void)
     //     "hola",
     //     NULL
     // };
-    exec_bin("busybox", busybox_argv, default_envp);
+    set_foreground_pid(exec_bin("busybox", busybox_argv, default_envp));
     // exec_bin("busybox", busybox_echo_argv, default_envp);
     // insmod("/kb_mod.o");
 

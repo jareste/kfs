@@ -10,6 +10,9 @@
 #include "../ide/ext2_fileio.h"
 #include "../memory/vmm.h"
 
+#define KFS_USER_STUB_ADDR      0xBF000000u
+#define KFS_SIGRETURN_STUB_ADDR (KFS_USER_STUB_ADDR + 0x100u)
+
 typedef enum
 {
     TASK_RUNNING,
@@ -84,7 +87,10 @@ typedef struct task_struct
     void* rseq_ptr;
     char** argv;
     int argc;
-    /* missing fields but untill it'll not work makes no sense to add them */    
+
+    iret_regs_t saved_sig_frame;
+    bool sig_frame_valid;
+    /* missing fields but untill it'll not work makes no sense to add them */
 } task_t;
 
 void pause_scheduler(int pause);
@@ -93,6 +99,8 @@ void scheduler_init(void);
 task_t* get_task_by_pid(pid_t pid);
 task_t* get_current_task();
 pid_t get_max_pid(void);
+pid_t get_foreground_pid(void);
+void set_foreground_pid(pid_t pid);
 void kill_task();
 pid_t _waitpid(pid_t pid, int *status, int options);
 pid_t _getpid(void);

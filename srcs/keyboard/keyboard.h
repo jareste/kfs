@@ -19,6 +19,10 @@ void clear_kb_buffer();
 
 char* get_line();
 
+void kb_raise_eof(void);
+bool kb_eof_pending(void);
+void kb_clear_eof(void);
+
 char get_ascii_char(uint8_t scancode, bool shifted);
 void set_keyboard_layout(uint8_t layout);
 

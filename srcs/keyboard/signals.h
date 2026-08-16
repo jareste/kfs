@@ -5,6 +5,10 @@
 
 #define MAX_SIGNALS 32
 
+/* Standard-ish signal numbers used by the tty/keyboard layer. */
+#define SIGINT  2
+#define SIGQUIT 3
+
 typedef void (*signal_handler_t)(int);
 typedef int pid_t;
 
@@ -17,8 +21,10 @@ typedef struct
 
 int _signal(int signal, signal_handler_t handler);
 int _kill(pid_t pid, int signal);
-// int _signal(pid_t pid, int signal);
-void handle_signals();
+
+void handle_signals(void *frame);
 void init_signals();
+
+int _sigaction(int signal, int set_handler, void *raw_handler, void **old_raw_handler);
 
 #endif

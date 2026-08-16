@@ -186,7 +186,6 @@ int exec_bin(const char* path, char* const argv[], char* const envp[])
     }
     sys_close(fd, get_current_task());
 
-
     char *kargv[64] = {NULL};
     char *kenvp[64] = {NULL};
     int argc = 0, envc = 0;
@@ -216,10 +215,15 @@ int exec_bin(const char* path, char* const argv[], char* const envp[])
     {
         puts_color("ELF load failed\n", RED);
         kfree(binary);
+        vmm_switch_directory(prev_dir);
+        pause_scheduler(0);
         return -1;
     }
 
     new_pid = create_user_task_at(entry, path, NULL, task_dir, heap_start, kargv, kenvp);
+
+    if (new_pid > 0 && get_current_task()->pid == (uint32_t)get_foreground_pid())
+        set_foreground_pid(new_pid);
 
 
     for (int i = 0; i < argc; i++) kfree(kargv[i]);

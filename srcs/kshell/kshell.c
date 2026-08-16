@@ -48,6 +48,8 @@ static void ks_get_pid();
 static void ks_read_mod_kb();
 static void ks_unreg_mod_kb();
 
+static void kshell_sigint_handler(int signal);
+
 static command_section_t command_sections[MAX_SECTIONS];
 
 static command_t global_commands[] = {
@@ -526,6 +528,13 @@ static void ks_unreg_mod_kb()
     unregister_keyboard_module();
 }
 
+static void kshell_sigint_handler(int signal)
+{
+    (void)signal;
+    clear_kb_buffer();
+    kprintf("\njareste-OS> ");
+}
+
 void kshell()
 {
     int i = 0;
@@ -534,12 +543,21 @@ void kshell()
     // tty_init();
     set_keyboard_layout(QWERTY_ENG);
     get_current_task()->screen_echo = true;
+    set_foreground_pid(_getpid());
+    _signal(SIGINT, kshell_sigint_handler);
     print_date();
     while (1)
     {
         // tty_save_to_file("/dev/tty");
         kprintf("jareste-OS> ");
         buffer = get_line();
+
+        if (kb_eof_pending())
+        {
+            kb_clear_eof();
+            puts("\nUse 'shutdown' or 'reboot' to leave jareste-OS\n");
+            continue;
+        }
 
         if (*buffer == 0)
             continue;

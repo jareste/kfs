@@ -274,10 +274,45 @@ int sys_getrandom(void *buf, size_t buflen, unsigned int flags)
     return buflen;
 }
 
+/* Mirrors musl's "struct k_sigaction" (src/internal/ksigaction.h) */
+struct k_sigaction
+{
+    void (*handler)(int);
+    unsigned long flags;
+    void (*restorer)(void);
+    unsigned mask[2];
+};
+
 int sys_rt_sigaction(int sig, void *act, void *oldact, size_t sigsetsize)
 {
-    (void)sig; (void)act; (void)oldact; (void)sigsetsize;
+    struct k_sigaction *ka = act;
+    struct k_sigaction *oka = oldact;
+    void *old_raw = NULL;
+    (void)sigsetsize;
+
+    if (_sigaction(sig, act != NULL, act ? (void*)ka->handler : NULL, oldact ? &old_raw : NULL) < 0)
+        return -22; // -EINVAL
+
+    if (oka)
+    {
+        memset(oka, 0, sizeof(*oka));
+        oka->handler = (void(*)(int))old_raw;
+    }
+
     return 0;
+}
+
+int sys_sigreturn(iret_regs_t *reg)
+{
+    task_t *task = get_current_task();
+
+    if (!task->sig_frame_valid)
+        return 0;
+
+    *reg = task->saved_sig_frame;
+    task->sig_frame_valid = false;
+
+    return (int)reg->eax;
 }
 
 /* no-op/succeed as musl/busybox tries to use it, but as we don't track a process name field, we just ignore it.
@@ -596,6 +631,11 @@ int syscall_handler(iret_regs_t* reg)
     if (syscall_number == SYS_FORK)
     {
         return sys_fork(reg);
+    }
+
+    if (syscall_number == SYS_KFS_SIGRETURN)
+    {
+        return sys_sigreturn(reg);
     }
 
     if (syscall_number >= SYS_MAX_SYSCALL || syscall_table[syscall_number].handler.handler == NULL)

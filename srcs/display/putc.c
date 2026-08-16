@@ -5,6 +5,13 @@ static int color = LIGHT_GREY;
 static bool ofuscated = false;
 static bool can_print = true;
 
+static int line_start = 0;
+
+void mark_input_line_start(void)
+{
+    line_start = cursor_position;
+}
+
 void enable_print()
 {
     can_print = true;
@@ -68,13 +75,14 @@ void clear_screen()
         }
     }
     cursor_position = 0;
+    line_start = 0;
     update_cursor(cursor_position);
 }
 
 void delete_last_char()
 {
     char *video_memory = (char *)VIDEO_MEMORY;
-    if (cursor_position > 0)
+    if (cursor_position > line_start)
     {
         cursor_position--;
         video_memory[cursor_position * 2] = '\0';
@@ -97,20 +105,24 @@ void delete_until_char()
 {
     char *video_memory = (char *)VIDEO_MEMORY;
 
-    if (cursor_position > 0)
+    if (cursor_position > line_start)
     {
         cursor_position--;
 
-        while (cursor_position >= 0 && video_memory[cursor_position * 2] == ' ')
+        while (cursor_position >= line_start && video_memory[cursor_position * 2] == ' ')
         {
             video_memory[cursor_position * 2] = ' ';
             video_memory[cursor_position * 2 + 1] = LIGHT_GREY;
             cursor_position--;
         }
 
-        if (cursor_position >= 0)
+        if (cursor_position >= line_start)
         {
             cursor_position++;
+        }
+        else
+        {
+            cursor_position = line_start;
         }
 
         update_cursor(cursor_position);
@@ -182,6 +194,16 @@ void putc_color(char c, uint8_t color)
         cursor_position -= (cursor_position % SCREEN_WIDTH);
         update_cursor(cursor_position);
     }
+    else if (c == '\b')
+    {
+        if (cursor_position > line_start)
+        {
+            cursor_position--;
+            video_memory[cursor_position * 2] = '\0';
+            video_memory[cursor_position * 2 + 1] = LIGHT_GREY;
+            update_cursor(cursor_position);
+        }
+    }
     else
     {
         video_memory[cursor_position * 2] = c;
@@ -194,6 +216,9 @@ void putc_color(char c, uint8_t color)
     {
         scroll_screen();
         cursor_position -= SCREEN_WIDTH;
+        line_start -= SCREEN_WIDTH;
+        if (line_start < 0)
+            line_start = 0;
         update_cursor(cursor_position);
     }
 }
