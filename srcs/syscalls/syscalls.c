@@ -722,6 +722,9 @@ void init_syscalls()
     syscall_table[SYS_CHMOD] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_chmod };
     syscall_table[SYS_CHDIR] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_chdir };
     syscall_table[SYS_MKDIR] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_mkdir };
+    syscall_table[SYS_RMDIR] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_rmdir };
+    syscall_table[SYS_RENAME] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_rename };
+    syscall_table[SYS_LINK] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_link };
     syscall_table[SYS_STATFS64] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 3, .handler.handler = (void*)sys_statfs64 };
     syscall_table[SYS_SYSINFO] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_sysinfo };
     syscall_table[SYS__LLSEEK] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 5, .handler.handler = (void*)sys_llseek };

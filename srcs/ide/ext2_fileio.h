@@ -80,6 +80,9 @@ int sys_open(const char *path, int flags);
 int sys_chmod(const char *path, int mode);
 int sys_chdir(const char *path);
 int sys_mkdir(const char *path, uint32_t mode);
+int sys_rmdir(const char *path);
+int sys_rename(const char *oldpath, const char *newpath);
+int sys_link(const char *oldpath, const char *newpath);
 
 struct kfs_statfs64
 {

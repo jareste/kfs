@@ -1301,22 +1301,39 @@ int sys_statfs64(const char *path, uint32_t bufsize, struct kfs_statfs64 *buf)
 
 int sys_close(int fd, task_t *task)
 {
-    // task_t* current;
     file_t* file_obj;
+    int shared;
+    int i;
 
-    // current = get_current_task();
     if (fd < 0 || fd >= MAX_FDS || task->fd_table[fd] == false)
         return -1;
 
     /* Get pointer to the file object in the array */
     file_obj = &task->fd_pointers[fd];
-    if (file_obj->ref_count > 1)
+
+    shared = 0;
+    if (file_obj->fp)
     {
-        file_obj->ref_count--;
+        for (i = 0; i < MAX_FDS; i++)
+        {
+            if (i == fd || !task->fd_table[i])
+                continue;
+            if (task->fd_pointers[i].fp == file_obj->fp &&
+                task->fd_pointers[i].type == file_obj->type)
+            {
+                shared = 1;
+                break;
+            }
+        }
+    }
+
+    if (shared)
+    {
         task->fd_table[fd] = false;
         memset(&task->fd_pointers[fd], 0, sizeof(file_t));
         return 0;
     }
+
     if (file_obj->fops.close)
         file_obj->fops.close(file_obj->fp);
     /* TODO modify */
@@ -1881,6 +1898,147 @@ int sys_mkdir(const char *path, uint32_t mode)
     if (ext2_add_dir_entry(parent, dir_name, new_inode, EXT2_FT_DIR) < 0)
         return -28; // -ENOSPC: parent directory has no room for a new entry
 
+    return 0;
+}
+
+int sys_rmdir(const char *path)
+{
+    uint32_t inode_num, parent;
+    struct ext2_inode dir;
+    char parent_path[256], dname[256];
+    uint8_t *blkbuf;
+    struct ext2_dir_entry *de;
+    int offset, count;
+
+    if (!path || !*path)
+        return -14; // -EFAULT
+
+    if (strcmp(path, "/") == 0)
+        return -16; // -EBUSY: can't remove the root directory
+
+    if (ext2_resolve_path(path, &inode_num) < 0)
+        return -2; // -ENOENT
+
+    ext2_read_inode(inode_num, &dir);
+    if (!(dir.i_mode & DIR_MODE))
+        return -20; // -ENOTDIR
+
+    split_path(path, parent_path, dname);
+    if (strcmp(dname, ".") == 0 || strcmp(dname, "..") == 0)
+        return -22; // -EINVAL: "." and ".." can never be removed this way
+
+    /* A directory is only ever "empty" once it holds nothing but its own
+     * "." and ".." entries */
+    blkbuf = kmalloc(EXT2_BLOCK_SIZE);
+    ext2_read_block(dir.i_block[0], blkbuf);
+    offset = 0;
+    count = 0;
+    while (offset < EXT2_BLOCK_SIZE)
+    {
+        de = (struct ext2_dir_entry *)(blkbuf + offset);
+        if (de->inode != 0)
+            count++;
+        offset += de->rec_len;
+    }
+    kfree(blkbuf);
+    if (count > 2)
+        return -39; // -ENOTEMPTY
+
+    if (ext2_resolve_path(parent_path, &parent) < 0)
+        return -2; // -ENOENT: parent directory not found (shouldn't happen)
+
+    if (ext2_remove_dir_entry(parent, dname) < 0)
+        return -2; // -ENOENT
+
+    ext2_free_block(dir.i_block[0]);
+    ext2_free_inode(inode_num);
+    return 0;
+}
+
+int sys_rename(const char *oldpath, const char *newpath)
+{
+    uint32_t src_inode_num, src_parent_inode, dst_parent_inode, dst_inode_num;
+    char src_parent[256], src_name[256];
+    char dst_parent[256], dst_name[256];
+    char joined_dst[256];
+    struct ext2_inode src_inode, dst_inode;
+    uint8_t file_type;
+
+    if (!oldpath || !*oldpath || !newpath || !*newpath)
+        return -14; // -EFAULT
+
+    if (ext2_resolve_path(oldpath, &src_inode_num) < 0)
+        return -2; // -ENOENT
+
+    split_path(oldpath, src_parent, src_name);
+    split_path(newpath, dst_parent, dst_name);
+
+    if (ext2_resolve_path(newpath, &dst_inode_num) == 0)
+    {
+        ext2_read_inode(dst_inode_num, &dst_inode);
+        if (dst_inode.i_mode & DIR_MODE)
+        {
+            strcpy(joined_dst, newpath);
+            strcat(joined_dst, "/");
+            strcat(joined_dst, src_name);
+            if (ext2_resolve_path(joined_dst, &dst_inode_num) == 0)
+                return -17; // -EEXIST: already something there with that name
+            strcpy(dst_parent, newpath);
+            strcpy(dst_name, src_name);
+        }
+        else
+        {
+            return -17; // -EEXIST
+        }
+    }
+
+    if (ext2_resolve_path(dst_parent, &dst_parent_inode) < 0)
+        return -2; // -ENOENT
+
+    ext2_read_inode(src_inode_num, &src_inode);
+    file_type = (src_inode.i_mode & DIR_MODE) ? EXT2_FT_DIR : EXT2_FT_REG_FILE;
+    if (ext2_add_dir_entry(dst_parent_inode, dst_name, src_inode_num, file_type) < 0)
+        return -28; // -ENOSPC
+
+    if (ext2_resolve_path(src_parent, &src_parent_inode) < 0)
+        return -2; // -ENOENT: shouldn't happen, src was just resolved above
+
+    if (ext2_remove_dir_entry(src_parent_inode, src_name) < 0)
+        return -2; // -ENOENT
+
+    return 0;
+}
+
+int sys_link(const char *oldpath, const char *newpath)
+{
+    uint32_t inode_num, parent, existing;
+    struct ext2_inode inode;
+    char parent_path[256], name[256];
+    uint8_t file_type;
+
+    if (!oldpath || !*oldpath || !newpath || !*newpath)
+        return -14; // -EFAULT
+
+    if (ext2_resolve_path(oldpath, &inode_num) < 0)
+        return -2; // -ENOENT
+
+    ext2_read_inode(inode_num, &inode);
+    if (inode.i_mode & DIR_MODE)
+        return -1; // -EPERM: hard-linking directories isn't allowed
+
+    if (ext2_resolve_path(newpath, &existing) == 0)
+        return -17; // -EEXIST
+
+    split_path(newpath, parent_path, name);
+    if (ext2_resolve_path(parent_path, &parent) < 0)
+        return -2; // -ENOENT
+
+    file_type = EXT2_FT_REG_FILE;
+    if (ext2_add_dir_entry(parent, name, inode_num, file_type) < 0)
+        return -28; // -ENOSPC
+
+    inode.i_links_count++;
+    ext2_write_inode(inode_num, &inode);
     return 0;
 }
 
