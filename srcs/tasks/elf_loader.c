@@ -190,14 +190,18 @@ int exec_bin(const char* path, char* const argv[], char* const envp[])
     char *kenvp[64] = {NULL};
     int argc = 0, envc = 0;
 
-    if (argv) {
-        while (argv[argc] && argc < 63) {
+    if (argv)
+    {
+        while (argv[argc] && argc < 63)
+        {
             kargv[argc] = kstrdup(argv[argc]);
             argc++;
         }
     }
-    if (envp) {
-        while (envp[envc] && envc < 63) {
+    if (envp)
+    {
+        while (envp[envc] && envc < 63)
+        {
             kenvp[envc] = kstrdup(envp[envc]);
             envc++;
         }
@@ -223,7 +227,13 @@ int exec_bin(const char* path, char* const argv[], char* const envp[])
     new_pid = create_user_task_at(entry, path, NULL, task_dir, heap_start, kargv, kenvp);
 
     if (new_pid > 0 && get_current_task()->pid == (uint32_t)get_foreground_pid())
-        set_foreground_pid(new_pid);
+    {
+        task_t *new_task = get_task_by_pid(new_pid);
+        if (new_task && new_task->fd_table[0] && new_task->fd_pointers[0].type == FD_TTY)
+            set_foreground_pid(new_pid);
+        else if (get_current_task()->parent)
+            set_foreground_pid((pid_t)get_current_task()->parent->pid);
+    }
 
 
     for (int i = 0; i < argc; i++) kfree(kargv[i]);

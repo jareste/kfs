@@ -276,7 +276,17 @@ void schedule_task_sleep(task_t* task, uint64_t seconds)
     task->state = TASK_SLEEPING;
     task->wake_tick = seconds;
     while (task->state == TASK_SLEEPING)
-        ;
+    {
+        enable_interrupts();
+
+        if (task->signals.pending_signals & ~task->signals.blocked_signals)
+        {
+            task->state = TASK_READY;
+            break;
+        }
+
+        asm volatile("hlt");
+    }
 }
 
 pid_t _wait(int* status)
@@ -303,11 +313,19 @@ pid_t _waitpid(pid_t pid, int *status, int options)
         return -1;
 
     if (current_task->pid == (uint32_t)m_foreground_pid)
-        m_foreground_pid = pid;
+    {
+        if (child->fd_table[0] && child->fd_pointers[0].type == FD_TTY)
+            m_foreground_pid = pid;
+        else if (!(current_task->fd_table[0] && current_task->fd_pointers[0].type == FD_TTY))
+            m_foreground_pid = current_task->parent ? (pid_t)current_task->parent->pid : m_foreground_pid;
+    }
 
     current_task->state = TASK_WAITING;
     while (child->state != TASK_ZOMBIE)
-        ;
+    {
+        enable_interrupts();
+        asm volatile("hlt");
+    }
 
     if (status)
         *status = child->exit_status;
@@ -355,7 +373,10 @@ int sys_wait4(pid_t pid, int *status, int options, void *rusage)
 
             current->state = TASK_WAITING;
             while (current->state == TASK_WAITING)
+            {
                 enable_interrupts();
+                asm volatile("hlt");
+            }
         }
     }
 
@@ -1257,7 +1278,10 @@ pid_t create_user_task_at(uint32_t entry_addr, const char *name, void (*on_exit)
     task->name[15] = '\0';
 
     memset(task->fd_table, 0, sizeof(task->fd_table));
-    init_standard_fds(task);
+    if (task->parent && task->parent->fd_table[0])
+        fork_init_fds(task, task->parent);
+    else
+        init_standard_fds(task);
     init_signals(task);
     add_new_task(task);
 

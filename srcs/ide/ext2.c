@@ -1100,6 +1100,20 @@ int sys_open(const char *path, int flags)
         return -1;
     }
 
+    if (strcmp(path, "/dev/null") == 0)
+    {
+        memset(&current->fd_pointers[fd], 0, sizeof(file_t));
+        current->fd_pointers[fd].type = FD_NULL;
+        current->fd_pointers[fd].flags = flags;
+        current->fd_pointers[fd].ref_count = 1;
+        current->fd_table[fd] = true;
+
+        if (fd == 0 && current->pid == (uint32_t)get_foreground_pid() && current->parent)
+            set_foreground_pid((pid_t)current->parent->pid);
+
+        return fd;
+    }
+
     if (strcmp(path, "/proc/mounts") == 0 || strcmp(path, "/proc/self/mounts") == 0)
         path = "/etc/mtab";
 
@@ -1289,7 +1303,7 @@ int sys_close(int fd, task_t *task)
 {
     // task_t* current;
     file_t* file_obj;
-    
+
     // current = get_current_task();
     if (fd < 0 || fd >= MAX_FDS || task->fd_table[fd] == false)
         return -1;
@@ -1299,6 +1313,8 @@ int sys_close(int fd, task_t *task)
     if (file_obj->ref_count > 1)
     {
         file_obj->ref_count--;
+        task->fd_table[fd] = false;
+        memset(&task->fd_pointers[fd], 0, sizeof(file_t));
         return 0;
     }
     if (file_obj->fops.close)
@@ -1310,7 +1326,7 @@ int sys_close(int fd, task_t *task)
     // }
     // else
     //     ext2_fclose(file_obj->fp);
-    
+
     /* Mark slot as free and zero out the structure */
     task->fd_table[fd] = false;
     memset(&task->fd_pointers[fd], 0, sizeof(file_t));
@@ -1331,6 +1347,9 @@ ssize_t sys_read(int fd, void *buf, size_t count)
 
     if (file_obj->type == FD_DIR)
         return -21; // -EISDIR
+
+    if (file_obj->type == FD_NULL)
+        return 0; // real /dev/null semantics: read always reports EOF
 
     if (file_obj->type == FD_MODULE)
     {
@@ -1591,6 +1610,11 @@ ssize_t sys_write(int fd, const void *buf, size_t count)
         return -1;
 
     file_obj = &current->fd_pointers[fd];
+
+    if (file_obj->type == FD_NULL)
+        return (ssize_t)count; // real /dev/null semantics: discard, report it all "written"
+
+    n = 0;
     if (file_obj->fops.write)
         n = file_obj->fops.write(file_obj->fp, buf, count);
 
@@ -1780,6 +1804,84 @@ void ext2_cmd_mkdir(const char *path)
     ext2_write_block(block, blkbuf);
     kfree(blkbuf);
     ext2_add_dir_entry(parent, dir_name, new_inode, EXT2_FT_DIR);
+}
+
+int sys_mkdir(const char *path, uint32_t mode)
+{
+    char parent_path[256];
+    char dir_name[256];
+    char *last_slash;
+    uint32_t parent;
+    uint32_t new_inode;
+    uint32_t block;
+    struct ext2_inode dir;
+    uint8_t *blkbuf;
+    struct ext2_dir_entry *de;
+    struct ext2_dir_entry *de2;
+
+    if (!path || !*path)
+        return -14; // -EFAULT
+
+    if (ext2_resolve_path(path, &parent) == 0)
+        return -17; // -EEXIST
+
+    strcpy(parent_path, path);
+    last_slash = strrchr(parent_path, '/');
+
+    if (last_slash)
+    {
+        strcpy(dir_name, last_slash + 1);
+        if (last_slash == parent_path)
+            strcpy(parent_path, "/");
+        else
+            *last_slash = '\0';
+    }
+    else
+    {
+        strcpy(dir_name, path);
+        strcpy(parent_path, ".");
+    }
+
+    if (ext2_resolve_path(parent_path, &parent) < 0)
+        return -2; // -ENOENT
+
+    new_inode = ext2_allocate_inode();
+    if (new_inode == 0)
+        return -28; // -ENOSPC
+
+    block = ext2_allocate_block();
+    if (block == 0)
+        return -28; // -ENOSPC
+
+    memset(&dir, 0, sizeof(dir));
+    dir.i_mode = DIR_MODE | (mode & 0777);
+    dir.i_size = EXT2_BLOCK_SIZE;
+    dir.i_links_count = 2; /* . and .. */
+    dir.i_block[0] = block;
+    dir.i_blocks = 2;
+    ext2_write_inode(new_inode, &dir);
+
+    blkbuf = kmalloc(EXT2_BLOCK_SIZE);
+    memset(blkbuf, 0, EXT2_BLOCK_SIZE);
+    de = (struct ext2_dir_entry *)blkbuf;
+    de->inode = new_inode;
+    de->rec_len = 12;
+    de->name_len = 1;
+    de->file_type = EXT2_FT_DIR;
+    strcpy(de->name, ".");
+    de2 = (struct ext2_dir_entry *)(blkbuf + 12);
+    de2->inode = parent;
+    de2->rec_len = EXT2_BLOCK_SIZE - 12;
+    de2->name_len = 2;
+    de2->file_type = EXT2_FT_DIR;
+    strcpy(de2->name, "..");
+    ext2_write_block(block, blkbuf);
+    kfree(blkbuf);
+
+    if (ext2_add_dir_entry(parent, dir_name, new_inode, EXT2_FT_DIR) < 0)
+        return -28; // -ENOSPC: parent directory has no room for a new entry
+
+    return 0;
 }
 
 void ext2_cmd_rm(const char *path)

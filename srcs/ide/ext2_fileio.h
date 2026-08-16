@@ -43,7 +43,7 @@ typedef struct ext2_FILE
     int mode;                   /* 0=read, 1=write (for simplicity) */
 } ext2_FILE;
 
-typedef enum { FD_FILE = 0, FD_SOCKET, FD_MODULE, FD_TTY, FD_DIR, FD_PROC_DIR } fd_type_t;
+typedef enum { FD_FILE = 0, FD_SOCKET, FD_MODULE, FD_TTY, FD_DIR, FD_PROC_DIR, FD_NULL } fd_type_t;
 
 /* With fileops i can directly dispatch the read/write/close operations
  * allowing me to use the same struct for files, modules, stdin/stdout, etc.
@@ -79,6 +79,7 @@ int ext2_fclose(ext2_FILE *stream);
 int sys_open(const char *path, int flags);
 int sys_chmod(const char *path, int mode);
 int sys_chdir(const char *path);
+int sys_mkdir(const char *path, uint32_t mode);
 
 struct kfs_statfs64
 {

@@ -61,6 +61,12 @@ struct user_desc
     unsigned int useable:1;
 };
 
+struct kfs_timespec32
+{
+    int32_t tv_sec;
+    int32_t tv_nsec;
+};
+
 syscall_entry_t syscall_table[SYS_MAX_SYSCALL];
 
 int sys_set_thread_area(struct user_desc *u_info)
@@ -150,7 +156,7 @@ int sys_get_pid()
 
 int sys_kill(uint32_t pid, uint32_t signal)
 {
-    return _kill(pid, signal);
+    return (_kill((pid_t)pid, (int)signal) > 0) ? 0 : -3; // -ESRCH
 }
 
 int sys_signal(uint32_t pid, signal_handler_t hand)
@@ -171,6 +177,24 @@ void sys_usleep(uint32_t microseconds)
 void sys_sleep(uint32_t seconds)
 {
     _sleep(seconds);
+}
+
+int sys_nanosleep(struct kfs_timespec32 *req, struct kfs_timespec32 *rem)
+{
+    if (!req)
+        return -14; // -EFAULT
+
+    if (req->tv_sec > 0)
+        _sleep((uint32_t)req->tv_sec);
+    if (req->tv_nsec > 0)
+        _usleep((uint32_t)(req->tv_nsec / 1000));
+
+    if (rem)
+    {
+        rem->tv_sec = 0;
+        rem->tv_nsec = 0;
+    }
+    return 0;
 }
 
 time_t sys_time(time_t* tloc)
@@ -697,6 +721,7 @@ void init_syscalls()
     syscall_table[SYS_OPEN] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)_sys_open };
     syscall_table[SYS_CHMOD] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_chmod };
     syscall_table[SYS_CHDIR] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_chdir };
+    syscall_table[SYS_MKDIR] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_mkdir };
     syscall_table[SYS_STATFS64] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 3, .handler.handler = (void*)sys_statfs64 };
     syscall_table[SYS_SYSINFO] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_sysinfo };
     syscall_table[SYS__LLSEEK] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 5, .handler.handler = (void*)sys_llseek };
@@ -705,7 +730,7 @@ void init_syscalls()
     syscall_table[SYS_SIGNAL] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_signal };
     syscall_table[SYS_KILL] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_kill };
     syscall_table[SYS_EXECVE] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 3, .handler.handler = (void*)sys_execve };
-    syscall_table[SYS_NANOSLEEP] = (syscall_entry_t){ .ret_value_entry = RET_VOID, .num_args = 1, .handler.handler = (void*)sys_usleep };
+    syscall_table[SYS_NANOSLEEP] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 2, .handler.handler = (void*)sys_nanosleep };
     syscall_table[SYS_SLEEP] = (syscall_entry_t){ .ret_value_entry = RET_VOID, .num_args = 1, .handler.handler = (void*)sys_sleep };
     syscall_table[SYS_PRCTL] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 5, .handler.handler = (void*)sys_prctl };
     syscall_table[SYS_TIME] = (syscall_entry_t){ .ret_value_entry = RET_INT, .num_args = 1, .handler.handler = (void*)sys_time };
