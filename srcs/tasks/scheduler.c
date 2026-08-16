@@ -337,35 +337,28 @@ int sys_wait4(pid_t pid, int *status, int options, void *rusage)
 {
     (void)rusage;
     task_t *current = get_current_task();
+    child_list_t *c;
+    pid_t ret;
 
     if (pid == -1)
     {
         while (1)
         {
-            task_t *t = task_list;
-            do
+            c = current->children;
+            while (c)
             {
-                if (t->parent == current && t->state == TASK_ZOMBIE)
+                if (c->task->state == TASK_ZOMBIE)
                 {
+                    ret = c->task->pid;
                     if (status)
-                        *status = t->exit_status;
-                    pid_t ret = t->pid;
-                    task_exit_task(t, t->exit_status);
+                        *status = c->task->exit_status;
+                    remove_from_father(c->task);
                     return ret;
                 }
-                t = t->next;
-            } while (t != task_list);
+                c = c->next;
+            }
 
-            int has_children = 0;
-            t = task_list;
-            do
-            {
-                if (t->parent == current)
-                    has_children = 1;
-                t = t->next;
-            } while (t != task_list);
-
-            if (!has_children)
+            if (!current->children)
                 return -1;
 
             if (options & 1) // WNOHANG = 1
@@ -622,18 +615,18 @@ void add_child(task_t* parent, task_t* child)
 
 void fork_init_fds(task_t *child, task_t *parent)
 {
+    int i;
+
     memcpy(child->fd_table, parent->fd_table, sizeof(parent->fd_table));
-    
-    for (int i = 0; i < MAX_FDS; i++)
+
+    for (i = 0; i < MAX_FDS; i++)
     {
         if (!child->fd_table[i])
             continue;
         memcpy(&child->fd_pointers[i], &parent->fd_pointers[i], sizeof(file_t));
         child->fd_pointers[i].ref_count++;
-        /* TODO: could be an issue as each file_t might have pointers to other
-         * structures that also need ref counting, but for now it works as is
-         * because we only have tty devices that don't have such pointers;
-         * keep it in mind if you add new types of file_t in the future. */
+        if (child->fd_pointers[i].type == FD_TTY && child->fd_pointers[i].fp)
+            ((tty_device_t*)child->fd_pointers[i].fp)->ref_count++;
     }
 }
 
