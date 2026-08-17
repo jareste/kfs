@@ -4,6 +4,7 @@
 #include "../utils/utils.h"
 #include "../panic/kpanic.h"
 #include "../display/display.h"
+#include "../keyboard/idt.h"
 
 /* ------------------------------------------------------------------ */
 /*  Locals                                                            */
@@ -49,9 +50,12 @@ uint32_t kbrk(int32_t increment)
     uint32_t unmap_to;
     uint32_t va;
     uint32_t old_break = heap_end;
+    uint32_t flags;
 
     if (increment == 0)
         return old_break;
+
+    flags = irq_save();
 
     new_break_signed = (int32_t)heap_end + increment;
 
@@ -105,6 +109,7 @@ uint32_t kbrk(int32_t increment)
     }
 
     heap_end = new_break;
+    irq_restore(flags);
     return old_break;
 }
 
@@ -199,11 +204,14 @@ void *kmalloc(uint32_t size)
     block_header_t *split;
     block_header_t *last;
     uint32_t old_break;
+    uint32_t flags;
 
     if (size == 0)
         return 0;
 
     size = ALIGN8(size);  /* keep allocations 8-byte aligned */
+
+    flags = irq_save();
 
     /* First-fit search */
     b = heap_head;
@@ -246,6 +254,7 @@ void *kmalloc(uint32_t size)
             b->prev = last;
         }
 
+        irq_restore(flags);
         return ptr_from_block(b);
     }
 
@@ -266,6 +275,7 @@ void *kmalloc(uint32_t size)
     }
 
     b->free = 0;
+    irq_restore(flags);
     return ptr_from_block(b);
 }
 
@@ -276,19 +286,24 @@ void *kmalloc(uint32_t size)
 void kfree(void *ptr)
 {
     block_header_t *b;
+    uint32_t flags;
 
     if (!ptr)
         return;
 
     b = block_from_ptr(ptr);
 
+    flags = irq_save();
+
     if (!block_valid(b))
     {
+        irq_restore(flags);
         kpanic("kfree: invalid pointer (bad magic) - possible corruption", 0);
         return;
     }
     if (b->free)
     {
+        irq_restore(flags);
         kpanic("kfree: double-free detected", 0);
         return;
     }
@@ -297,6 +312,7 @@ void kfree(void *ptr)
 
     /* Merge with adjacent free blocks */
     coalesce(b);
+    irq_restore(flags);
 }
 
 /* ------------------------------------------------------------------ */

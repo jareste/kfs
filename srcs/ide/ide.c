@@ -6,6 +6,7 @@
 #include "../display/display.h"
 #include "../tasks/task.h"
 #include "../panic/kpanic.h"
+#include "../keyboard/idt.h"
 
 #define MAX_LBA        0x0FFFFFFF
 #define IDE_QUEUE_SIZE 64
@@ -88,8 +89,7 @@ static void ide_select_drive(uint32_t lba)
 void ide_read_sectors_monotask(uint32_t lba, uint8_t count, uint16_t* buffer)
 {
     uint8_t s;
-
-    disable_interrupts();
+    uint32_t flags = irq_save();
 
     ide_wait_nonbusy();
     ide_select_drive(lba);
@@ -114,14 +114,13 @@ void ide_read_sectors_monotask(uint32_t lba, uint8_t count, uint16_t* buffer)
         insw(IDE_DATA, buffer + (uint32_t)s * 256, 256);
     }
 
-    enable_interrupts();
+    irq_restore(flags);
 }
 
 void ide_write_sectors_monotask(uint32_t lba, uint8_t count, uint16_t* buffer)
 {
     uint8_t s;
-
-    disable_interrupts();
+    uint32_t flags = irq_save(); /* see ide_read_sectors_monotask() */
 
     ide_wait_nonbusy();
     ide_select_drive(lba);
@@ -150,7 +149,7 @@ void ide_write_sectors_monotask(uint32_t lba, uint8_t count, uint16_t* buffer)
         }
     }
 
-    enable_interrupts();
+    irq_restore(flags);
 }
 
 void ide_read_sector_monotask(uint32_t lba, uint16_t* buffer)

@@ -54,6 +54,9 @@ extern idt_ptr idtp;
 void enable_interrupts(void);
 void disable_interrupts(void);
 
+uint32_t irq_save(void);
+void irq_restore(uint32_t flags);
+
 void init_interrupts();
 
 void idt_set_gate(int idx, uint32_t base);

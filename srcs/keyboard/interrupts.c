@@ -49,6 +49,18 @@ void disable_interrupts(void)
 	__asm__ __volatile__("cli");
 }
 
+uint32_t irq_save(void)
+{
+	uint32_t eflags;
+	__asm__ __volatile__("pushf\n\tpop %0\n\tcli" : "=r"(eflags) :: "memory");
+	return eflags;
+}
+
+void irq_restore(uint32_t eflags)
+{
+	__asm__ __volatile__("push %0\n\tpopf" :: "r"(eflags) : "memory", "cc");
+}
+
 /* PAGE FAULT HANDLER */
 void page_fault_handler(registers* regs, error_state* stack)
 {
