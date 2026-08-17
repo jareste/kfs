@@ -8,10 +8,11 @@ CC = gcc
 AS = nasm
 # CFLAGS  = -m32 -ffreestanding -nostdlib -nodefaultlibs \
 #            -fno-builtin -fno-exceptions -fno-stack-protector \
-#            -O2 -Wall -Wextra
+#            -O0 -Wall -Wextra
 CFLAGS  = -m32 -ffreestanding -nostdlib -nodefaultlibs \
 			-fno-builtin -fno-exceptions -fno-stack-protector \
 			-O0 -Wall -Wextra -g
+# ASFLAGS = -f elf
 ASFLAGS = -f elf -g
 LDFLAGS = -m elf_i386
 

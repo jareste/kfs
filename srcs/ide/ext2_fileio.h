@@ -83,6 +83,7 @@ int sys_mkdir(const char *path, uint32_t mode);
 int sys_rmdir(const char *path);
 int sys_rename(const char *oldpath, const char *newpath);
 int sys_link(const char *oldpath, const char *newpath);
+int sys_unlink(const char *path);
 
 struct kfs_statfs64
 {

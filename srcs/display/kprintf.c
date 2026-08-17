@@ -10,6 +10,7 @@ int kprintf(const char *format, ...)
 
     void *arg = (void *)(&format + 1);
 
+    i = 0;
     for (traverse = format; *traverse != '\0'; traverse++)
     {
         while (*traverse != '%' && *traverse != '\0')

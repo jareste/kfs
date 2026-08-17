@@ -2042,6 +2042,42 @@ int sys_link(const char *oldpath, const char *newpath)
     return 0;
 }
 
+int sys_unlink(const char *path)
+{
+    uint32_t inode_num, parent;
+    struct ext2_inode inode;
+    char parent_path[256], name[256];
+
+    if (!path || !*path)
+        return -14; // -EFAULT
+
+    if (ext2_resolve_path(path, &inode_num) < 0)
+        return -2; // -ENOENT
+
+    ext2_read_inode(inode_num, &inode);
+    if (inode.i_mode & DIR_MODE)
+        return -21; // -EISDIR
+
+    split_path(path, parent_path, name);
+    if (ext2_resolve_path(parent_path, &parent) < 0)
+        return -2; // -ENOENT
+
+    if (ext2_remove_dir_entry(parent, name) < 0)
+        return -2; // -ENOENT
+
+    inode.i_links_count--;
+    ext2_write_inode(inode_num, &inode);
+
+    if (inode.i_links_count == 0)
+    {
+        if (inode.i_block[0])
+            ext2_free_block(inode.i_block[0]);
+        ext2_free_inode(inode_num);
+    }
+
+    return 0;
+}
+
 void ext2_cmd_rm(const char *path)
 {
     uint32_t inode_num;

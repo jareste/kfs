@@ -199,7 +199,7 @@ void free_finished_tasks()
     /* TODO: "This might not be working, check it out" */
     if (to_free->page_dir)
     {
-        for (int32_t i = 0; i < 1024; i++)
+        for (uint32_t i = 0; i < 1024; i++)
         {
             uint32_t virt_start = i * 4 * 1024 * 1024;
             if (virt_start < 0x08000000 || virt_start >= 0x0C000000)
@@ -393,6 +393,10 @@ task_t* get_task_by_pid(pid_t pid)
 void check_wake_up(task_t* task)
 {
     if ((task->state == TASK_SLEEPING) && (get_tick_count() >= task->wake_tick))
+    {
+        task->state = TASK_READY;
+    }
+    if (task->signals.pending_signals & ~task->signals.blocked_signals)
     {
         task->state = TASK_READY;
     }
@@ -883,7 +887,7 @@ pid_t _do_fork(iret_regs_t* parent_frame)
     if (parent->pid == (uint32_t)m_foreground_pid)
         m_foreground_pid = child->pid;
 
-    kprintf("Forked new task '%s' with PID %d from parent PID %d\n", child->name, child->pid, parent->pid);
+    // kprintf("Forked new task '%s' with PID %d from parent PID %d\n", child->name, child->pid, parent->pid);
 
     return child->pid;
 }
@@ -1332,6 +1336,7 @@ void start_foo_tasks(void)
     static char *default_envp[] = {
         "PATH=/bin:/usr/bin",
         "HOME=/",
+        "PWD=/",
         // "TERM=linux",
         NULL
     };
