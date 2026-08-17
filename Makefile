@@ -131,7 +131,16 @@ crdisk:
 
 # dd if=/dev/zero of=disk.img bs=512 count=20480
 
-format: crdisk
+SYSROOT_LIBC = sysroot/lib/libc.a
+BUSYBOX_BIN = busybox
+
+$(SYSROOT_LIBC): install_musl.sh third-party/musl-1.2.6.tar.gz
+	./install_musl.sh
+
+$(BUSYBOX_BIN): install_busybox.sh third-party/busybox-1.36.1.tar.bz2 third-party/busybox-1.36.1.config $(SYSROOT_LIBC)
+	./install_busybox.sh
+
+format: crdisk $(BUSYBOX_BIN)
 	- mkdir mnt_ext2
 	cc ext2_format.c -o ext2_format
 	cp config/users.config .
