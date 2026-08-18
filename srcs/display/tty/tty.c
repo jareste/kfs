@@ -268,13 +268,174 @@ ssize_t tty_write(void *fp, const void *buf_, size_t count)
     return count;
 }
 
+void tty_mark_line_start(tty_device_t *tty)
+{
+    tty->line_start = tty->write_pos;
+    tty->edit_pos = tty->write_pos;
+}
+
+static uint32_t tty_line_len(tty_device_t *tty)
+{
+    return (tty->write_pos - tty->line_start + TTY_BUFFER_SIZE) % TTY_BUFFER_SIZE;
+}
+
+static void tty_redraw_tail(tty_device_t *tty, uint32_t from_pos, uint32_t trailing_blanks, uint32_t cursor_target)
+{
+    int base_col = get_input_line_start();
+    uint32_t offset;
+    uint32_t pos;
+
+    offset = (from_pos - tty->line_start + TTY_BUFFER_SIZE) % TTY_BUFFER_SIZE;
+    set_cursor_position(base_col + (int)offset);
+
+    for (pos = from_pos; pos != tty->write_pos; pos = (pos + 1) % TTY_BUFFER_SIZE)
+        putc(tty->buffer[pos]);
+    while (trailing_blanks--)
+        putc(' ');
+
+    offset = (cursor_target - tty->line_start + TTY_BUFFER_SIZE) % TTY_BUFFER_SIZE;
+    set_cursor_position(base_col + (int)offset);
+}
+
+void tty_insert_char(tty_device_t *tty, char c)
+{
+    uint32_t old_edit_pos = tty->edit_pos;
+    uint32_t pos;
+    uint32_t prev;
+
+    if (old_edit_pos == tty->write_pos)
+    {
+        tty_write_ch(tty, c);
+        tty->edit_pos = tty->write_pos;
+        return;
+    }
+
+    pos = tty->write_pos;
+    while (pos != old_edit_pos)
+    {
+        prev = (pos - 1 + TTY_BUFFER_SIZE) % TTY_BUFFER_SIZE;
+        tty->buffer[pos] = tty->buffer[prev];
+        pos = prev;
+    }
+    tty->buffer[old_edit_pos] = c;
+    tty->write_pos = (tty->write_pos + 1) % TTY_BUFFER_SIZE;
+    tty->edit_pos = (old_edit_pos + 1) % TTY_BUFFER_SIZE;
+
+    tty_redraw_tail(tty, old_edit_pos, 0, tty->edit_pos);
+}
+
+void tty_backspace_at_cursor(tty_device_t *tty)
+{
+    uint32_t del_pos;
+    uint32_t src;
+    uint32_t dst;
+
+    if (tty->edit_pos == tty->line_start)
+        return;
+
+    del_pos = (tty->edit_pos - 1 + TTY_BUFFER_SIZE) % TTY_BUFFER_SIZE;
+
+    dst = del_pos;
+    src = tty->edit_pos;
+    while (src != tty->write_pos)
+    {
+        tty->buffer[dst] = tty->buffer[src];
+        dst = (dst + 1) % TTY_BUFFER_SIZE;
+        src = (src + 1) % TTY_BUFFER_SIZE;
+    }
+    tty->write_pos = (tty->write_pos - 1 + TTY_BUFFER_SIZE) % TTY_BUFFER_SIZE;
+    tty->edit_pos = del_pos;
+
+    tty_redraw_tail(tty, del_pos, 1, tty->edit_pos);
+}
+
+void tty_delete_forward(tty_device_t *tty)
+{
+    uint32_t src;
+    uint32_t dst;
+
+    if (tty->edit_pos == tty->write_pos)
+        return; /* nothing after the cursor */
+
+    dst = tty->edit_pos;
+    src = (tty->edit_pos + 1) % TTY_BUFFER_SIZE;
+    while (src != tty->write_pos)
+    {
+        tty->buffer[dst] = tty->buffer[src];
+        dst = (dst + 1) % TTY_BUFFER_SIZE;
+        src = (src + 1) % TTY_BUFFER_SIZE;
+    }
+    tty->write_pos = (tty->write_pos - 1 + TTY_BUFFER_SIZE) % TTY_BUFFER_SIZE;
+
+    tty_redraw_tail(tty, tty->edit_pos, 1, tty->edit_pos);
+}
+
+void tty_move_edit_cursor(tty_device_t *tty, int delta)
+{
+    uint32_t line_len = tty_line_len(tty);
+    uint32_t cur_offset = (tty->edit_pos - tty->line_start + TTY_BUFFER_SIZE) % TTY_BUFFER_SIZE;
+    int new_offset = (int)cur_offset + delta;
+
+    if (new_offset < 0)
+        new_offset = 0;
+    if (new_offset > (int)line_len)
+        new_offset = (int)line_len;
+
+    tty->edit_pos = (tty->line_start + (uint32_t)new_offset) % TTY_BUFFER_SIZE;
+    set_cursor_position(get_input_line_start() + new_offset);
+}
+
+void tty_recall_line(tty_device_t *tty, const char *line, size_t len)
+{
+    uint32_t old_len = tty_line_len(tty);
+    uint32_t pos;
+    uint32_t blanks;
+    size_t i;
+
+    tty->write_pos = tty->line_start;
+    for (i = 0; i < len && i < TTY_BUFFER_SIZE - 1; i++)
+    {
+        tty->buffer[tty->write_pos] = line[i];
+        tty->write_pos = (tty->write_pos + 1) % TTY_BUFFER_SIZE;
+    }
+    tty->edit_pos = tty->write_pos;
+
+    set_cursor_position(get_input_line_start());
+    for (pos = tty->line_start; pos != tty->write_pos; pos = (pos + 1) % TTY_BUFFER_SIZE)
+        putc(tty->buffer[pos]);
+
+    if (old_len > (uint32_t)i)
+    {
+        blanks = old_len - (uint32_t)i;
+        while (blanks--)
+            putc(' ');
+        set_cursor_position(get_input_line_start() + (int)i);
+    }
+}
+
+size_t tty_current_line(tty_device_t *tty, char *out, size_t out_size)
+{
+    uint32_t pos = tty->line_start;
+    size_t n = 0;
+
+    while (pos != tty->write_pos && n < out_size)
+    {
+        out[n++] = tty->buffer[pos];
+        pos = (pos + 1) % TTY_BUFFER_SIZE;
+    }
+    return n;
+}
+
 int tty_keyboard_input(void *fp, const char *buf, size_t count)
 {
     tty_device_t *tty = (tty_device_t *)fp;
-    for (size_t i = 0; i < count; i++) {
+    size_t i;
+
+    for (i = 0; i < count; i++)
+    {
         tty->buffer[tty->write_pos] = buf[i];
         tty->write_pos = (tty->write_pos + 1) % TTY_BUFFER_SIZE;
-        putc(buf[i]);  // echo del teclado
+        putc(buf[i]);
     }
     return count;
 }

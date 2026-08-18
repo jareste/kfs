@@ -7,9 +7,108 @@ static bool can_print = true;
 
 static int line_start = 0;
 
+#define SCROLLBACK_LINES        200
+#define SCROLLBACK_LINE_BYTES   (80 * 2)
+
+static char scrollback_ring[SCROLLBACK_LINES][SCROLLBACK_LINE_BYTES];
+static int  scrollback_head = 0;
+static int  scrollback_count = 0;
+static int  scrollback_offset = 0;
+
+static char live_snapshot[SCROLLBACK_LINE_BYTES * 64];
+
+static void scrollback_push_line(const char *video_line)
+{
+    memcpy(scrollback_ring[scrollback_head], video_line, SCREEN_WIDTH * 2);
+    scrollback_head = (scrollback_head + 1) % SCROLLBACK_LINES;
+    if (scrollback_count < SCROLLBACK_LINES)
+        scrollback_count++;
+}
+
+static void repaint_scrollback_view(void)
+{
+    char* video_memory = (char *)VIDEO_MEMORY;
+    int row;
+    int ring_lines_shown;
+    int lines_back;
+    int idx;
+
+    if (scrollback_offset == 0)
+    {
+        memcpy(video_memory, live_snapshot, (size_t)SCREEN_WIDTH * SCREEN_HEIGHT * 2);
+        return;
+    }
+
+    ring_lines_shown = scrollback_offset;
+    if (ring_lines_shown > SCREEN_HEIGHT)
+        ring_lines_shown = SCREEN_HEIGHT;
+
+    for (row = 0; row < ring_lines_shown; row++)
+    {
+        lines_back = scrollback_offset - row;
+        idx = (scrollback_head - lines_back + SCROLLBACK_LINES) % SCROLLBACK_LINES;
+        memcpy(video_memory + row * SCREEN_WIDTH * 2, scrollback_ring[idx], SCREEN_WIDTH * 2);
+    }
+
+    for (; row < SCREEN_HEIGHT; row++)
+    {
+        int live_row = row - ring_lines_shown;
+        memcpy(video_memory + row * SCREEN_WIDTH * 2,
+               live_snapshot + live_row * SCREEN_WIDTH * 2, (size_t)SCREEN_WIDTH * 2);
+    }
+}
+
+void scroll_view_up(int lines)
+{
+    int max_offset = scrollback_count;
+
+    if (scrollback_offset == 0)
+        memcpy(live_snapshot, (char *)VIDEO_MEMORY, (size_t)SCREEN_WIDTH * SCREEN_HEIGHT * 2);
+
+    scrollback_offset += lines;
+    if (scrollback_offset > max_offset)
+        scrollback_offset = max_offset;
+
+    repaint_scrollback_view();
+}
+
+void scroll_view_down(int lines)
+{
+    if (scrollback_offset == 0)
+        return;
+
+    scrollback_offset -= lines;
+    if (scrollback_offset < 0)
+        scrollback_offset = 0;
+
+    repaint_scrollback_view();
+}
+
+static void scrollback_snap_to_live(void)
+{
+    if (scrollback_offset != 0)
+        scroll_view_down(scrollback_offset);
+}
+
 void mark_input_line_start(void)
 {
     line_start = cursor_position;
+}
+
+int get_input_line_start(void)
+{
+    return line_start;
+}
+
+int get_cursor_position(void)
+{
+    return cursor_position;
+}
+
+void set_cursor_position(int pos)
+{
+    cursor_position = pos;
+    update_cursor(cursor_position);
 }
 
 void enable_print()
@@ -40,6 +139,8 @@ void set_putchar_color(uint8_t c)
 static void scroll_screen()
 {
     char *video_memory = (char *)VIDEO_MEMORY;
+
+    scrollback_push_line(video_memory);
 
     for (int i = 0; i < (SCREEN_HEIGHT - 1) * SCREEN_WIDTH * 2; i++)
     {
@@ -176,6 +277,8 @@ void putc_color(char c, uint8_t color)
     {
         return;
     }
+
+    scrollback_snap_to_live();
 
     video_memory = (char *)VIDEO_MEMORY;
 

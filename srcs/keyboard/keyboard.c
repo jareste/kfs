@@ -15,6 +15,9 @@
 #define KEYBOARD_STATUS_PORT 0x64
 
 #define KEYBOARD_BUFFER_SIZE 256
+#define CMD_HISTORY_SIZE      32
+#define CMD_HISTORY_LINE_MAX  256
+
 static char keyboard_buffer[KEYBOARD_BUFFER_SIZE] = {0};
 static int keyb_buff_start = 0;
 static int keyb_buff_end = 0;
@@ -23,16 +26,77 @@ static bool shift_pressed = false;
 static bool ctrl_pressed = false;
 static bool at_line_start = true;
 
+static volatile bool kb_eof_flag = false;
+
+static char   cmd_history[CMD_HISTORY_SIZE][CMD_HISTORY_LINE_MAX];
+static size_t cmd_history_len[CMD_HISTORY_SIZE];
+static int    cmd_history_count = 0;  /* valid entries, <= CMD_HISTORY_SIZE */
+static int    cmd_history_head = 0;   /* next slot to write */
+static int    cmd_history_browse = -1; /* -1 = not browsing; else steps back from the newest entry */
+
 static void arm_line_start_if_needed(void)
 {
     if (at_line_start)
     {
+        task_t *fg = get_task_by_pid(get_foreground_pid());
+
         mark_input_line_start();
+        if (fg && fg->fd_table[0] && fg->fd_pointers[0].type == FD_TTY)
+            tty_mark_line_start((tty_device_t *)fg->fd_pointers[0].fp);
         at_line_start = false;
     }
 }
 
-static volatile bool kb_eof_flag = false;
+static void history_push(const char *line, size_t len)
+{
+    if (len == 0)
+        return; /* don't clutter history with bare Enters */
+    if (len >= CMD_HISTORY_LINE_MAX)
+        len = CMD_HISTORY_LINE_MAX - 1;
+
+    memcpy(cmd_history[cmd_history_head], line, len);
+    cmd_history_len[cmd_history_head] = len;
+    cmd_history_head = (cmd_history_head + 1) % CMD_HISTORY_SIZE;
+    if (cmd_history_count < CMD_HISTORY_SIZE)
+        cmd_history_count++;
+}
+
+static void history_browse_reset(void)
+{
+    cmd_history_browse = -1;
+}
+
+/* direction < 0: older (Up). direction > 0: newer (Down). */
+static void history_recall(tty_device_t *tty, int direction)
+{
+    int next, idx;
+
+    if (direction < 0)
+    {
+        if (cmd_history_count == 0)
+            return;
+        next = (cmd_history_browse < 0) ? 0 : cmd_history_browse + 1;
+        if (next >= cmd_history_count)
+            return; /* already at the oldest entry */
+    }
+    else
+    {
+        if (cmd_history_browse < 0)
+            return; /* not browsing -- nothing "newer" to go to */
+        next = cmd_history_browse - 1;
+    }
+
+    cmd_history_browse = next;
+
+    if (cmd_history_browse < 0)
+    {
+        tty_recall_line(tty, "", 0);
+        return;
+    }
+
+    idx = (cmd_history_head - 1 - cmd_history_browse + CMD_HISTORY_SIZE) % CMD_HISTORY_SIZE;
+    tty_recall_line(tty, cmd_history[idx], cmd_history_len[idx]);
+}
 
 void kb_raise_eof(void)
 {
@@ -137,8 +201,9 @@ static bool broadcast_to_tty(char key)
     task_t *task = get_task_by_pid(get_foreground_pid());
 
     if (task && task->is_user && task->fd_table[0] &&
-        task->fd_pointers[0].type == FD_TTY) {
-        tty_keyboard_input(task->fd_pointers[0].fp, &key, 1);
+        task->fd_pointers[0].type == FD_TTY)
+    {
+        tty_insert_char((tty_device_t *)task->fd_pointers[0].fp, key);
         return true;
     }
     return false;
@@ -170,22 +235,55 @@ void keyboard_handler()
             ctrl_pressed = false;
             break;
         case 0x4B:
-            // move_cursor_left();
+            arm_line_start_if_needed();
+            fg_task = get_task_by_pid(get_foreground_pid());
+            if (fg_task && fg_task->fd_table[0] && fg_task->fd_pointers[0].type == FD_TTY)
+                tty_move_edit_cursor((tty_device_t *)fg_task->fd_pointers[0].fp, -1);
             break;
         case 0x4D:
-            // move_cursor_right();
+            arm_line_start_if_needed();
+            fg_task = get_task_by_pid(get_foreground_pid());
+            if (fg_task && fg_task->fd_table[0] && fg_task->fd_pointers[0].type == FD_TTY)
+                tty_move_edit_cursor((tty_device_t *)fg_task->fd_pointers[0].fp, 1);
             break;
         case 0x48:
-            // move_cursor_up();
+            arm_line_start_if_needed();
+            fg_task = get_task_by_pid(get_foreground_pid());
+            if (fg_task && fg_task->fd_table[0] && fg_task->fd_pointers[0].type == FD_TTY)
+                history_recall((tty_device_t *)fg_task->fd_pointers[0].fp, -1);
             break;
         case 0x50:
-            // move_cursor_down();
+            arm_line_start_if_needed();
+            fg_task = get_task_by_pid(get_foreground_pid());
+            if (fg_task && fg_task->fd_table[0] && fg_task->fd_pointers[0].type == FD_TTY)
+                history_recall((tty_device_t *)fg_task->fd_pointers[0].fp, 1);
+            break;
+        case 0x49:
+            scroll_view_up(SCREEN_HEIGHT);
+            break;
+        case 0x51:
+            scroll_view_down(SCREEN_HEIGHT);
+            break;
+        case 0x47: /* Home */
+            arm_line_start_if_needed();
+            fg_task = get_task_by_pid(get_foreground_pid());
+            if (fg_task && fg_task->fd_table[0] && fg_task->fd_pointers[0].type == FD_TTY)
+                tty_move_edit_cursor((tty_device_t *)fg_task->fd_pointers[0].fp, -TTY_BUFFER_SIZE);
+            break;
+        case 0x4F: /* End */
+            arm_line_start_if_needed();
+            fg_task = get_task_by_pid(get_foreground_pid());
+            if (fg_task && fg_task->fd_table[0] && fg_task->fd_pointers[0].type == FD_TTY)
+                tty_move_edit_cursor((tty_device_t *)fg_task->fd_pointers[0].fp, TTY_BUFFER_SIZE);
             break;
         case 0x0F:
             puts("    ");
             break;
         case 0x53:
-            // delete_actual_char(); // better do nothing for now. it's delete
+            arm_line_start_if_needed();
+            fg_task = get_task_by_pid(get_foreground_pid());
+            if (fg_task && fg_task->fd_table[0] && fg_task->fd_pointers[0].type == FD_TTY)
+                tty_delete_forward((tty_device_t *)fg_task->fd_pointers[0].fp);
             break;
         case 0x01:
             clear_screen();
@@ -199,7 +297,10 @@ void keyboard_handler()
             else
             {
                 delete_last_kb_char();
-                if (!broadcast_to_tty('\b'))
+                fg_task = get_task_by_pid(get_foreground_pid());
+                if (fg_task && fg_task->fd_table[0] && fg_task->fd_pointers[0].type == FD_TTY)
+                    tty_backspace_at_cursor((tty_device_t *)fg_task->fd_pointers[0].fp);
+                else
                     delete_last_char(); /* no foreground tty (e.g. kshell): erase directly */
             }
             break;
@@ -259,7 +360,29 @@ void keyboard_handler()
             if (key)
             {
                 arm_line_start_if_needed();
-                broadcast_to_tty(key);
+                if (key == '\n')
+                {
+                    /* Capture the line into history *before* the newline
+                     * that submits it lands in the buffer. */
+                    fg_task = get_task_by_pid(get_foreground_pid());
+                    if (fg_task && fg_task->fd_table[0] && fg_task->fd_pointers[0].type == FD_TTY)
+                    {
+                        char linebuf[CMD_HISTORY_LINE_MAX];
+                        tty = (tty_device_t *)fg_task->fd_pointers[0].fp;
+                        size_t linelen = tty_current_line(tty, linebuf, sizeof(linebuf));
+                        history_push(linebuf, linelen);
+                        tty_write_ch(tty, key); /* always append at the true end, not the edit cursor */
+                    }
+                    else
+                    {
+                        broadcast_to_tty(key);
+                    }
+                    history_browse_reset();
+                }
+                else
+                {
+                    broadcast_to_tty(key);
+                }
                 set_kb_char(key);
                 if (key == '\n')
                     at_line_start = true;

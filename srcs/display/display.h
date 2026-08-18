@@ -43,6 +43,13 @@ void put_zu(size_t value);
 
 int kprintf(const char *format, ...);
 
+void scroll_view_up(int lines);
+void scroll_view_down(int lines);
+
+void update_cursor(int position);
+int get_cursor_position(void);
+void set_cursor_position(int pos);
+int get_input_line_start(void);
 
 void clear_screen();
 void delete_last_char();
