@@ -1326,11 +1326,9 @@ void unsleep_kshell()
 }
 
 void kshell();
-void ide_task_main(void);
 void start_foo_tasks(void)
 {
     // create_task(kshell, "kshell", NULL);
-    create_task(ide_task_main, "ide", NULL);
 
     // create_task(task_wait, "task_wait", NULL);
     // create_task(task_1, "task_1", task_1_exit);
