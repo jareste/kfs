@@ -154,12 +154,15 @@ void free_envp(task_t* task)
 
 void close_all_fds(task_t* task)
 {
-    for (int i = 0; i < MAX_FDS; i++)
+    uint32_t i;
+    file_t* f;
+
+    for (i = 0; i < MAX_FDS; i++)
     {
         if (!task->fd_table[i])
             continue;
 
-        file_t *f = &task->fd_pointers[i];
+        f = &task->fd_pointers[i];
         if (f->fops.close && f->fp)
             f->fops.close(f->fp);
 
@@ -170,14 +173,14 @@ void close_all_fds(task_t* task)
 
 void free_finished_tasks()
 {
-    /* Not just re-entrancy against itself: task_exit_task() can call this
-     * directly (its "there's already one queued" path), outside of
-     * timer_schedule()'s own inside_timer_schedule guard. If a timer IRQ
-     * lands anywhere in the body below before to_free is cleared at the
-     * end, timer_schedule()'s own call sees the same still-set to_free
-     * and processes it a second time -- kfree()ing the same kernel stack
-     * (and everything else here) twice. */
+    uint32_t i;
+    uint32_t j;
+    uint32_t virt_start;
+    bool cloneable;
+    bool has_user_pages;
+    page_table_t *tbl;
     static bool busy = false;
+
     if (!to_free || busy)
         return;
     busy = true;
@@ -194,24 +197,36 @@ void free_finished_tasks()
     }
     else
         kfree((void*)to_free->stack);
-    // if (to_free->stub_page)
-    //     vfree((void*)to_free->stub_page);
-    /* TODO: "This might not be working, check it out" */
+
     if (to_free->page_dir)
     {
-        for (uint32_t i = 0; i < 1024; i++)
+        for (i = 0; i < 1024; i++)
         {
-            uint32_t virt_start = i * 4 * 1024 * 1024;
-            if (virt_start < 0x08000000 || virt_start >= 0x0C000000)
-                continue;
-            if (!to_free->page_dir->entries[i])
+            virt_start = i * 4 * 1024 * 1024;
+            cloneable = ((virt_start >= 0x08000000) && (virt_start < 0x0C000000)) ||
+                              ((virt_start >= 0xBF000000) && (virt_start < 0xC0000000)) ||
+                              ((virt_start >= 0xD0000000) && (virt_start < 0xF0000000));
+            if (!cloneable || !to_free->page_dir->entries[i])
                 continue;
 
-            page_table_t *tbl = (page_table_t*)
+            tbl = (page_table_t*)
                 (to_free->page_dir->entries[i] & 0xFFFFF000);
-            for (int32_t j = 0; j < 1024; j++)
+
+            has_user_pages = false;
+            for (j = 0; j < 1024; j++)
             {
-                if (tbl->entries[j] & PAGE_PRESENT)
+                if ((tbl->entries[j] & PAGE_PRESENT) && (tbl->entries[j] & PAGE_USER))
+                {
+                    has_user_pages = true;
+                    break;
+                }
+            }
+            if (!has_user_pages)
+                continue;
+
+            for (j = 0; j < 1024; j++)
+            {
+                if ((tbl->entries[j] & PAGE_PRESENT) && (tbl->entries[j] & PAGE_USER))
                     pmm_free_frame(tbl->entries[j] & 0xFFFFF000);
             }
             pmm_free_frame((uint32_t)tbl);
