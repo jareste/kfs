@@ -11,6 +11,7 @@
 #include "../modules/mod_keyboard.h"
 
 #include "../ide/ext2_fileio.h"
+#include "../memory/kmalloc.h"
 
 #define MAX_COMMANDS 256
 #define MAX_SECTIONS_COMMANDS 25
@@ -48,6 +49,10 @@ static void ks_get_pid();
 static void ks_read_mod_kb();
 static void ks_unreg_mod_kb();
 
+static void ks_meminfo();
+static void ks_memcheck();
+static void ks_memdead();
+
 static void kshell_sigint_handler(int signal);
 
 static command_section_t command_sections[MAX_SECTIONS];
@@ -84,6 +89,15 @@ static command_t dcommand[] = {
     {"raise0", "Raise a division by zero exception", trigger_interrupt_software_0},
     {"raise6", "Raise an invalid opcode exception", trigger_interrupt_software_6},
     {"syscall", "Test syscalls", test_syscall},
+    {NULL, NULL, NULL}
+};
+
+static command_t mcommand[] = {
+    {"meminfo", "Show heap stats (live/used/free/peak/total allocs+frees)", ks_meminfo},
+    {"memdump", "Dump every heap block (used and free) with owner info", kmalloc_dump},
+    {"memleaks", "List every currently-live allocation and who made it", kmalloc_dump_leaks},
+    {"memcheck", "Audit the whole heap for corruption (magic/redzone/links)", ks_memcheck},
+    {"memdead", "List live allocations whose owning task has already exited", ks_memdead},
     {NULL, NULL, NULL}
 };
 
@@ -145,9 +159,33 @@ void init_kshell()
 
     install_all_cmds(global_commands, GLOBAL);
     install_all_cmds(in_commands, GENERAL);
+    install_all_cmds(mcommand, MEMORY);
     install_all_cmds(dcommand, DEBUG);
     install_all_cmds(tcommand, TASKS);
     install_module_commands();
+}
+
+static void ks_meminfo()
+{
+    kprintf("Heap stats:\n");
+    kprintf("  live allocations : %d\n", kmalloc_live_count());
+    kprintf("  used bytes       : %d\n", kmalloc_used_bytes());
+    kprintf("  free bytes       : %d\n", kmalloc_free_bytes());
+    kprintf("  peak used bytes  : %d\n", kmalloc_peak_bytes());
+    kprintf("  total allocs     : %d\n", kmalloc_total_allocs());
+    kprintf("  total frees      : %d\n", kmalloc_total_frees());
+}
+
+static void ks_memcheck()
+{
+    kmalloc_audit();
+}
+
+static void ks_memdead()
+{
+    uint32_t count = kmalloc_check_dead_owners();
+    if (count == 0)
+        kprintf("No live allocations owned by a dead task.\n");
 }
 
 static void kuptime()

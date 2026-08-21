@@ -181,7 +181,7 @@ void free_finished_tasks()
     page_table_t *tbl;
     static bool busy = false;
 
-    if (!to_free || busy)
+    if (!to_free || busy || to_free == current_task)
         return;
     busy = true;
 
@@ -354,11 +354,13 @@ int sys_wait4(pid_t pid, int *status, int options, void *rusage)
     task_t *current = get_current_task();
     child_list_t *c;
     pid_t ret;
+    uint32_t flags;
 
     if (pid == -1)
     {
         while (1)
         {
+            flags = irq_save();
             c = current->children;
             while (c)
             {
@@ -368,10 +370,12 @@ int sys_wait4(pid_t pid, int *status, int options, void *rusage)
                     if (status)
                         *status = c->task->exit_status;
                     remove_from_father(c->task);
+                    irq_restore(flags);
                     return ret;
                 }
                 c = c->next;
             }
+            irq_restore(flags);
 
             if (!current->children)
                 return -1;
@@ -1326,9 +1330,11 @@ void unsleep_kshell()
 }
 
 void kshell();
+void mem_check_task_main(void);
 void start_foo_tasks(void)
 {
     // create_task(kshell, "kshell", NULL);
+    create_task(mem_check_task_main, "mem_check", NULL);
 
     // create_task(task_wait, "task_wait", NULL);
     // create_task(task_1, "task_1", task_1_exit);

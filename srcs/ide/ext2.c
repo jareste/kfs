@@ -599,7 +599,7 @@ int ext2_fclose(ext2_FILE *stream)
 size_t ext2_fread(ext2_FILE *stream, void *ptr, size_t size)
 {
     // uint8_t blockbuf[EXT2_BLOCK_SIZE];
-    uint8_t *blockbuf = kmalloc(EXT2_BLOCK_SIZE);
+    uint8_t *blockbuf;
     size_t bytes_read;
     uint8_t *out;
     size_t remain;
@@ -616,6 +616,8 @@ size_t ext2_fread(ext2_FILE *stream, void *ptr, size_t size)
         return 0;
     if (stream->pos >= stream->inode.i_size)
         return 0;
+
+    blockbuf = kmalloc(EXT2_BLOCK_SIZE);
 
     remain = stream->inode.i_size - stream->pos;
     if (remain < size)

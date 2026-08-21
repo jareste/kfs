@@ -41,7 +41,7 @@ C_SOURCES = kernel.c strcmp.c strlen.c kprintf.c putc.c puts.c keyboard.c \
 			strtok.c strcspn.c strspn.c strcat.c env.c \
 			strchr.c memmove.c uitoa.c vstrdup.c kstrdup.c sock_registers.c \
 			tty.c modules.c mod_keyboard.c mod_time.c elf_loader.c elf_module.c \
-			task_offsets.c
+			task_offsets.c mem_check.c
 
 ASM_SOURCES = boot.asm handler.asm gdt_asm.asm dump_registers.asm \
 			  clear_registers.asm tasks.asm

@@ -1,6 +1,7 @@
 #include "gdt.h"
 #include "../display/display.h"
 #include "../tasks/task.h"
+#include "../memory/vmm.h"
 
 gdt_entry_t gdt[GDT_ENTRIES];
 gdt_ptr_t* gdt_ptr = (gdt_ptr_t*)GDT_ADDRESS;
@@ -100,14 +101,12 @@ void print_gdt8()
         : "r"((uint32_t)0x43)
     );
     kprintf("gs:0x0 = %x\n", gs_zero);
-    uint32_t tls_va = 0x804d000;
-    uint32_t di = tls_va >> 22;
-    uint32_t ti = (tls_va >> 12) & 0x3FF;
-    page_directory_t *dir = get_current_task()->page_dir;
-    uint32_t pde = dir->entries[di];
-    page_table_t *tbl = (page_table_t*)(pde & 0xFFFFF000);
-    uint32_t pte = tbl->entries[ti];
-    kprintf("PDE=%x PTE=%x\n", pde, pte);
+
+    {
+        uint32_t tls_va = 0x804d000;
+        uint32_t phys = vmm_get_physical(vmm_current_directory(), tls_va);
+        kprintf("0x804d000 -> phys=%x\n", phys);
+    }
 }
 
 void gdt_init()

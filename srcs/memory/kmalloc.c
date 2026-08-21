@@ -5,6 +5,7 @@
 #include "../panic/kpanic.h"
 #include "../display/display.h"
 #include "../keyboard/idt.h"
+#include "../tasks/task.h"
 
 /* ------------------------------------------------------------------ */
 /*  Locals                                                            */
@@ -14,10 +15,15 @@ static uint32_t heap_start = 0; /* first byte of the heap        */
 static uint32_t heap_end   = 0; /* current break (one past last) */
 static uint32_t heap_max   = 0; /* absolute ceiling              */
 static block_header_t* heap_head = 0; /* first block in the list       */
+static uint32_t m_alloc_id_counter = 0;
+static uint32_t m_total_allocs     = 0;
+static uint32_t m_total_frees      = 0;
+static uint32_t m_peak_used_bytes  = 0;
 
 /* ------------------------------------------------------------------ */
 /*  Utils                                                             */
 /* ------------------------------------------------------------------ */
+#define KMALLOC_POISON_BYTE 0xDEu
 
 #define ALIGN8(n)   (((n) + 7u) & ~7u)
 
@@ -34,6 +40,30 @@ static void *ptr_from_block(block_header_t *b)
 static int block_valid(block_header_t *b)
 {
     return b && b->magic == BLOCK_MAGIC;
+}
+
+static void write_redzone(block_header_t *b)
+{
+    uint32_t *rz = (uint32_t *)((uint8_t *)ptr_from_block(b) + b->requested_size);
+    rz[0] = KMALLOC_REDZONE_WORD;
+    rz[1] = KMALLOC_REDZONE_WORD;
+}
+
+static int redzone_valid(block_header_t *b)
+{
+    uint32_t *rz = (uint32_t *)((uint8_t *)ptr_from_block(b) + b->requested_size);
+    return rz[0] == KMALLOC_REDZONE_WORD && rz[1] == KMALLOC_REDZONE_WORD;
+}
+
+static uint32_t used_bytes_locked(void)
+{
+    uint32_t total = 0;
+    block_header_t *b;
+
+    for (b = heap_head; b && block_valid(b); b = b->next)
+        if (!b->free)
+            total += b->size;
+    return total;
 }
 
 /* ------------------------------------------------------------------ */
@@ -189,6 +219,11 @@ void kmalloc_init(uint32_t start)
     heap_head->free = 1;
     heap_head->next = 0;
     heap_head->prev = 0;
+    heap_head->requested_size = 0;
+    heap_head->alloc_caller = 0;
+    heap_head->free_caller = 0;
+    heap_head->alloc_id = 0; /* 0 = never allocated via kmalloc() */
+    heap_head->owner_pid = (pid_t)-1;
 
     kprintf("[KMALLOC] heap @ %x - %x (max %x)\n",
            heap_start, heap_end, heap_max);
@@ -198,18 +233,40 @@ void kmalloc_init(uint32_t start)
 /*  kmalloc                                                            */
 /* ------------------------------------------------------------------ */
 
-void *kmalloc(uint32_t size)
+static void finish_alloc(block_header_t *b, uint32_t aligned_requested, void *caller)
+{
+    uint32_t used;
+    task_t *current = get_current_task();
+
+    b->requested_size = aligned_requested;
+    b->alloc_caller    = caller;
+    b->free_caller     = 0;
+    b->alloc_id        = ++m_alloc_id_counter;
+    b->owner_pid       = current ? (pid_t)current->pid : (pid_t)-1;
+    write_redzone(b);
+
+    m_total_allocs++;
+    used = used_bytes_locked();
+    if (used > m_peak_used_bytes)
+        m_peak_used_bytes = used;
+}
+
+void *kmalloc(uint32_t requested)
 {
     block_header_t *b;
     block_header_t *split;
     block_header_t *last;
     uint32_t old_break;
     uint32_t flags;
+    uint32_t aligned_requested;
+    uint32_t total_size;
+    void *caller = __builtin_return_address(0);
 
-    if (size == 0)
+    if (requested == 0)
         return 0;
 
-    size = ALIGN8(size);  /* keep allocations 8-byte aligned */
+    aligned_requested = ALIGN8(requested);       /* what the caller gets    */
+    total_size        = aligned_requested + KMALLOC_REDZONE_SIZE; /* what we reserve */
 
     flags = irq_save();
 
@@ -220,7 +277,7 @@ void *kmalloc(uint32_t size)
         if (!block_valid(b))
             kpanic("kmalloc: heap corruption detected (bad magic)", 1);
 
-        if (b->free && b->size >= size)
+        if (b->free && b->size >= total_size)
             break;
         b = b->next;
     }
@@ -228,13 +285,13 @@ void *kmalloc(uint32_t size)
     /* No suitable block found: expand the heap */
     if (!b)
     {
-        old_break = kbrk((int32_t)(HEADER_SIZE + size));
+        old_break = kbrk((int32_t)(HEADER_SIZE + total_size));
         if (old_break == 0)
             kpanic("kmalloc: kbrk failed", 1);
 
         b = (block_header_t *)old_break;
         b->magic = BLOCK_MAGIC;
-        b->size = size;
+        b->size = total_size;
         b->free = 0;
         b->next = 0;
         b->prev = 0;
@@ -254,27 +311,34 @@ void *kmalloc(uint32_t size)
             b->prev = last;
         }
 
+        finish_alloc(b, aligned_requested, caller);
         irq_restore(flags);
         return ptr_from_block(b);
     }
 
     /* ---- Split the block if there is enough room for a new header ---- */
-    if (b->size >= size + HEADER_SIZE + 8)
+    if (b->size >= total_size + HEADER_SIZE + 8)
     {
-        split = (block_header_t *)((uint8_t *)b + HEADER_SIZE + size);
+        split = (block_header_t *)((uint8_t *)b + HEADER_SIZE + total_size);
         split->magic = BLOCK_MAGIC;
-        split->size = b->size - size - HEADER_SIZE;
+        split->size = b->size - total_size - HEADER_SIZE;
         split->free = 1;
         split->next = b->next;
         split->prev = b;
+        split->requested_size = 0;
+        split->alloc_caller = 0;
+        split->free_caller = 0;
+        split->alloc_id = 0;
+        split->owner_pid = (pid_t)-1;
 
         if (b->next)
             b->next->prev = split;
         b->next = split;
-        b->size = size;
+        b->size = total_size;
     }
 
     b->free = 0;
+    finish_alloc(b, aligned_requested, caller);
     irq_restore(flags);
     return ptr_from_block(b);
 }
@@ -287,6 +351,7 @@ void kfree(void *ptr)
 {
     block_header_t *b;
     uint32_t flags;
+    void *caller = __builtin_return_address(0);
 
     if (!ptr)
         return;
@@ -298,17 +363,37 @@ void kfree(void *ptr)
     if (!block_valid(b))
     {
         irq_restore(flags);
+        kprintf("[KMALLOC] kfree(%x) by %x: not a live allocation (bad magic %x)\n",
+                (uint32_t)ptr, (uint32_t)caller, b ? b->magic : 0);
         kpanic("kfree: invalid pointer (bad magic) - possible corruption", 0);
         return;
     }
     if (b->free)
     {
         irq_restore(flags);
+        kprintf("[KMALLOC] double-free: %x (alloc #%d, %d bytes, allocated by %x) "
+                "was already freed by %x -- now attempted again by %x\n",
+                (uint32_t)ptr, b->alloc_id, b->requested_size,
+                (uint32_t)b->alloc_caller, (uint32_t)b->free_caller, (uint32_t)caller);
         kpanic("kfree: double-free detected", 0);
+        return;
+    }
+    if (!redzone_valid(b))
+    {
+        kprintf("[KMALLOC] heap buffer overflow: alloc #%d @ %x (%d bytes, allocated by %x) "
+                "corrupted its own redzone -- caught on free by %x\n",
+                b->alloc_id, (uint32_t)ptr, b->requested_size, (uint32_t)b->alloc_caller, (uint32_t)caller);
+        irq_restore(flags);
+        kpanic("kfree: redzone overflow detected -- buffer written past its end", 0);
         return;
     }
 
     b->free = 1;
+    b->free_caller = caller;
+    m_total_frees++;
+
+    /* Best-effort UAF tripwire -- see KMALLOC_POISON_BYTE. */
+    memset(ptr, KMALLOC_POISON_BYTE, b->requested_size);
 
     /* Merge with adjacent free blocks */
     coalesce(b);
@@ -334,11 +419,11 @@ uint32_t ksize(void *ptr)
         return 0;
     }
 
-    return b->size;
+    return b->requested_size;
 }
 
 /* ------------------------------------------------------------------ */
-/*  Helpers/CLI commands                                              */
+/*  Diagnostics                                                        */
 /* ------------------------------------------------------------------ */
 
 void kmalloc_dump(void)
@@ -347,7 +432,7 @@ void kmalloc_dump(void)
     uint32_t idx;
 
     kprintf("=== KMALLOC HEAP DUMP ===\n");
-    kprintf("heap: 0x%x - 0x%x\n", heap_start, heap_end);
+    kprintf("heap: %x - %x\n", heap_start, heap_end);
 
     b = heap_head;
     idx = 0;
@@ -356,18 +441,137 @@ void kmalloc_dump(void)
     {
         if (!block_valid(b))
         {
-            kprintf("  [%d] CORRUPTED BLOCK @ 0x%x\n", idx, (uint32_t)b);
+            kprintf("  [%d] CORRUPTED BLOCK @ %x (magic=%x)\n", idx, (uint32_t)b, b->magic);
             break;
         }
-        kprintf("  [%d] @ 0x%x  size=%-6d  %s\n",
-               idx,
-               (uint32_t)b,
-               b->size,
-               b->free ? "FREE" : "USED");
+        if (b->free)
+        {
+            if (b->alloc_id == 0)
+                kprintf("  [%d] @ %x  size=%d  FREE  (never allocated)\n",
+                        idx, (uint32_t)b, b->size);
+            else
+                kprintf("  [%d] @ %x  size=%d  FREE  (alloc #%d by %x, freed by %x)\n",
+                        idx, (uint32_t)b, b->size, b->alloc_id,
+                        (uint32_t)b->alloc_caller, (uint32_t)b->free_caller);
+        }
+        else
+        {
+            kprintf("  [%d] @ %x  size=%d  USED  alloc #%d by %x  owner_pid=%d\n",
+                    idx, (uint32_t)b, b->requested_size, b->alloc_id, (uint32_t)b->alloc_caller, b->owner_pid);
+        }
         b = b->next;
         idx++;
     }
-    kprintf("=== END HEAP DUMP ===\n");
+    kprintf("=== END KMALLOC HEAP DUMP ===\n");
+}
+
+void kmalloc_dump_leaks(void)
+{
+    block_header_t *b;
+    uint32_t count = 0;
+    uint32_t total = 0;
+
+    kprintf("=== LIVE ALLOCATIONS ===\n");
+    for (b = heap_head; b; b = b->next)
+    {
+        if (!block_valid(b))
+        {
+            kprintf("  CORRUPTED BLOCK @ %x -- stopping\n", (uint32_t)b);
+            break;
+        }
+        if (b->free)
+            continue;
+
+        kprintf("  alloc #%d @ %x  %d bytes  by %x  owner_pid=%d\n",
+                b->alloc_id, (uint32_t)ptr_from_block(b), b->requested_size, (uint32_t)b->alloc_caller, b->owner_pid);
+        count++;
+        total += b->requested_size;
+    }
+    kprintf("=== %d live allocation(s), %d bytes total ===\n", count, total);
+}
+
+static uint32_t audit_walk(void)
+{
+    block_header_t *b;
+    uint32_t problems = 0;
+    uint32_t live_walked = 0;
+    uint32_t expected_live;
+
+    for (b = heap_head; b; b = b->next)
+    {
+        if (!block_valid(b))
+        {
+            kprintf("  [CORRUPT] block @ %x has a bad magic (%x) -- cannot trust the list past this point\n",
+                    (uint32_t)b, b ? b->magic : 0);
+            problems++;
+            break;
+        }
+
+        if (!b->free)
+        {
+            live_walked++;
+            if (!redzone_valid(b))
+            {
+                kprintf("  [OVERFLOW] alloc #%d @ %x (%d bytes, by %x) has a corrupted redzone\n",
+                        b->alloc_id, (uint32_t)ptr_from_block(b), b->requested_size, (uint32_t)b->alloc_caller);
+                problems++;
+            }
+        }
+
+        if (b->next && b->next->prev != b)
+        {
+            kprintf("  [LINK] block @ %x and %x disagree about being neighbours\n",
+                    (uint32_t)b, (uint32_t)b->next);
+            problems++;
+        }
+    }
+
+    expected_live = m_total_allocs - m_total_frees;
+    if (live_walked != expected_live)
+    {
+        kprintf("  [MISMATCH] %d live block(s) found by walking the heap, but total_allocs-total_frees says %d\n",
+                live_walked, expected_live);
+        problems++;
+    }
+
+    return problems;
+}
+
+uint32_t kmalloc_audit(void)
+{
+    uint32_t problems;
+
+    kprintf("=== KMALLOC AUDIT ===\n");
+    problems = audit_walk();
+    kprintf("=== AUDIT DONE: %d problem(s) found ===\n", problems);
+    return problems;
+}
+
+uint32_t kmalloc_audit_quiet(void)
+{
+    return audit_walk();
+}
+
+uint32_t kmalloc_check_dead_owners(void)
+{
+    block_header_t *b;
+    uint32_t problems = 0;
+
+    for (b = heap_head; b && block_valid(b); b = b->next)
+    {
+        if (b->free || b->owner_pid == (pid_t)-1)
+            continue;
+
+        if (get_task_by_pid(b->owner_pid) == NULL)
+        {
+            kprintf("  [DEAD OWNER] alloc #%d @ %x (%d bytes, by %x) belongs to pid %d, which no longer exists\n",
+                    b->alloc_id, (uint32_t)ptr_from_block(b), b->requested_size,
+                    (uint32_t)b->alloc_caller, b->owner_pid);
+            problems++;
+        }
+    }
+
+    return problems;
 }
 
 uint32_t kmalloc_free_bytes(void)
@@ -385,13 +589,32 @@ uint32_t kmalloc_free_bytes(void)
 
 uint32_t kmalloc_used_bytes(void)
 {
-    uint32_t total = 0;
-    block_header_t *b = heap_head;
-    while (b)
-    {
+    return used_bytes_locked();
+}
+
+uint32_t kmalloc_live_count(void)
+{
+    block_header_t *b;
+    uint32_t count = 0;
+
+    for (b = heap_head; b && block_valid(b); b = b->next)
         if (!b->free)
-            total += b->size;
-        b = b->next;
-    }
-    return total;
+            count++;
+
+    return count;
+}
+
+uint32_t kmalloc_total_allocs(void)
+{
+    return m_total_allocs;
+}
+
+uint32_t kmalloc_total_frees(void)
+{
+    return m_total_frees;
+}
+
+uint32_t kmalloc_peak_bytes(void)
+{
+    return m_peak_used_bytes;
 }
